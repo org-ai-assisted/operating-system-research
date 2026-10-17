@@ -370,6 +370,46 @@ truly zero-step compressed artifact exists only on the read-only-medium side (a
 squashfs ISO boots compressed with no unwrap), which cannot persist -- see the
 Goals conflicts.
 
+### Flashing an `.img.xz`: which tools decompress on the fly
+
+Whether `.img.xz` is zero-step (G7) depends entirely on the flashing tool. The
+ones that decompress xz WHILE writing to the device (no manual `xz -d`):
+
+- balenaEtcher -- GUI; xz, gz, bz2, zip (not zstd). NOT in the Debian archive
+  (balena ships an external `.deb`/AppImage only). Per-format decoders in its
+  SDK: https://github.com/balena-io-modules/etcher-sdk/tree/master/lib/source-destination
+- Raspberry Pi Imager -- GUI; libarchive-based, so xz/gz/bz2/zstd/zip. NOT in
+  Debian (upstream/snap only). Source:
+  https://github.com/raspberrypi/rpi-imager/blob/main/src/downloadextractthread.cpp
+- GNOME Disks ("Restore Disk Image...") -- GUI; xz ONLY (gz/bz2/zst must be
+  unpacked by hand, per the still-open request). IN Debian:
+  `gnome-disk-utility` (trixie 46.1, bookworm 43.0).
+  https://gitlab.gnome.org/GNOME/gnome-disk-utility/-/issues/342
+- bmaptool -- CLI; decompresses xz/gz/bz2/zst/lz4/lzo on the fly, with OR
+  without a `.bmap` (`bmaptool copy image.img.xz /dev/sdX`; `--nobmap` for a
+  plain decompress-and-write, no bmap acceleration). This is effectively the
+  "dd that understands xz." IN Debian: `bmap-tools` (bookworm 3.6-2); in trixie
+  `bmap-tools` is a transitional package and the binary moved to the renamed
+  `bmaptool` 3.9.0-3 (command is `bmaptool` either way).
+  https://manpages.debian.org/trixie/bmap-tools/bmaptool.1.en.html
+
+So within the Debian archive itself -- the relevant ecosystem for a
+Debian-based Kicksecure/Whonix -- the xz-decompressing writers are bmaptool
+(CLI) and GNOME Disks (GUI, xz-only). balenaEtcher, Raspberry Pi Imager and
+usbimager are NOT packaged (usbimager and the GNOME GUI Impression do xz
+upstream but are absent from Debian stable; Impression is testing/sid only),
+and `gnome-multi-writer` is packaged but writes raw with no decompression.
+
+Zero-install fallback, always available (`dd` from coreutils + `xzcat` from
+xz-utils, every suite):
+
+    xzcat image.img.xz | dd of=/dev/sdX bs=4M status=progress
+
+NOT decompressed by: plain `dd` alone, and VirtualBox's
+`VBoxManage convertfromraw` (the G5 path), which needs an uncompressed raw
+image -- so `.img.xz` still costs those users a manual `xz -d`.
+https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/vboxmanage-convertfromraw.html
+
 ### Full-disk-encryption fork
 
 A mass-produced image cannot bake a per-user passphrase. Two ways to reach

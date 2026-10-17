@@ -260,9 +260,12 @@ verification -- it checks `.builtin` and `.secondary`, into which only
 modules). Note the asymmetry: `.platform`/`db` DOES anchor dm-verity roothash and
 kexec, but NOT modules. So without MOK an out-of-tree `.ko` cannot be trusted
 except by rebuilding the kernel with the key in `CONFIG_SYSTEM_TRUSTED_KEYS`,
-which abandons riding Debian's stock kernel. Hence the conditional "if sovereign
-boot can replace MOK, shim is optional" resolves NEGATIVE for Kicksecure: on a
-stock kernel it cannot, so shim stays. (Module-sig enforcement only bites under
+which abandons riding Debian's stock kernel. And Kicksecure does NOT plan to
+build its own kernel at this time, so that rebuild escape hatch is explicitly off
+the table -- leaving MOK (hence shim) as the ONLY path for user module signing.
+Hence the conditional "if sovereign boot can replace MOK, shim is optional"
+resolves NEGATIVE for Kicksecure: on a stock kernel it cannot, so shim stays.
+(Module-sig enforcement only bites under
 Secure Boot -- `CONFIG_MODULE_SIG_FORCE` is unset, lockdown enforces -- and the
 MOK path needs `CONFIG_INTEGRITY_MACHINE_KEYRING=y`, present in trixie. An
 upstream RFC `CONFIG_MODULE_SIG_PLATFORM` (2025, not merged) would let `db` sign

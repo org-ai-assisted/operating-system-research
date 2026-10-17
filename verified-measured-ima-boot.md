@@ -55,7 +55,11 @@ already has the compile-time gates (`CONFIG_INTEGRITY_MACHINE_KEYRING=y`,
 `CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` + `..._SECONDARY_KEYRING=y`, read from
 `/boot/config`), so only the `--trust-mok` runtime step is needed -- no kernel
 rebuild. And (c) run a `postinst`/kernel/initramfs hook that re-signs on every
-update.
+update. (This MOK path is a SHIM feature and applies to the default, MS-shim
+design. Full Sovereign Boot drops shim, so there is no MOK at all -- trust then
+roots in your own keys in UEFI `db`, which the kernel loads directly into its
+`.platform` keyring, and dm-verity anchors via `..._PLATFORM_KEYRING` instead of
+MOK/`.machine`. See the Sovereign Boot section.)
 
 
 ## How the major projects solve it
@@ -200,19 +204,51 @@ selected by the owner, so Kicksecure can offer BOTH:
   forbids MS-signed binaries DURABLY, unlike merely dropping MS from `db`, which a
   later firmware/vendor update or KEK-authorized `db` change could silently
   re-add), enrolls only the owner's keys into db, and re-takes ownership with a
-  fresh ephemeral `PK`. The owner's key becomes the sole trust root.
+  fresh ephemeral `PK`. The owner's key becomes the sole trust root. Because the
+  MS-signed shim no longer verifies under sovereign keys, this also means DROPPING
+  shim -- which REMOVES the MOK layer entirely (MOK, MokManager, `MokListRT` and
+  `SHIM_LOCK` are shim features). Trust then roots in your own keys in UEFI `db`,
+  loaded by the kernel directly into `.platform`, and dm-verity roothash
+  signatures anchor via `CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING`,
+  not the MOK/`.machine` path the default uses.
 
-They conflict only at the strict end, and the resolution is a spectrum, not one
-config: ship MS-shim-compatible by default (works everywhere; additive MOK for
-owners who want to sign their own UKIs/kernels), and present full Sovereign Boot
-as a deliberate owner-driven migration. Full sovereignty has real costs -- the
-MS-signed shim itself lands in `dbx` and becomes unusable, so the whole chain
-must be signed by the owner's key, and dual-boot / vendor recovery /
-firmware-capsule paths that rely on MS signatures break. It also sidesteps the
-mid-2026 Microsoft 2011-CA expiry (the replacement UEFI CA 2023 must reach each
-machine's db via firmware/OS updates; an owner who roots trust only in their own
-db does not depend on that rotation). Status: Sovereign Boot is RC/demo-stage
-(3mdeb spec v0.1.0), not a shipped default.
+These are NOT one spectrum of the same mechanism: the default roots trust in
+Microsoft's CA (via the MS-signed shim) with the owner's key ADDED through MOK,
+whereas Sovereign Boot roots trust in the owner's own `db` keys and REPLACES the
+MOK layer rather than extending it. The honest shape: ship MS-shim-compatible by
+default (works everywhere; the owner may add their key via MOK to sign their own
+UKIs), and present Sovereign Boot as a deliberate migration to a different trust
+root. Its costs: the whole chain must be signed by the owner's key; dual-boot /
+vendor recovery / firmware-capsule paths relying on MS signatures break; and the
+shim question is awkward -- Debian's only shim is Microsoft-CA-signed, so under
+sovereign keys you must either trust it BY HASH in `db` (fragile: re-enroll on
+every `shim-signed` update) or RE-SIGN it with your own key; the cleanest design
+simply DROPS shim and boots an own-signed loader straight from `db`. (Debian bug
+#1102680 is an open request for a Debian-CA-signed shim that would ease a
+Debian-key sovereign path.) The kernel holds NO built-in Microsoft key -- MS is
+trusted only because it sits in UEFI `db` -- so removing MS from `db` (and adding
+it to `dbx`) drops MS trust chain-wide, kernel included. Sovereign Boot also
+sidesteps the mid-2026 Microsoft 2011-CA expiry (the replacement UEFI CA 2023
+must reach each machine's db via firmware/OS updates; an owner rooting trust only
+in their own db does not depend on that rotation). Kicksecure's own Keys section
+has not committed to a MOK design; its forward model is user-controlled key
+enrollment confirmed in firmware (TOFU + fingerprint display + multi-key
+rotation) -- the Sovereign-Boot end of this. Status: Sovereign Boot is
+RC/demo-stage (3mdeb spec v0.1.0), not a shipped default.
+
+**Kicksecure requirement: keep MOK functional.** Because MOK is a shim feature
+(MokManager, `MokListRT`, `SHIM_LOCK`), keeping it working means keeping shim in
+the chain -- so the "drop shim" cleanest-sovereign path is ruled out for
+Kicksecure. The compatible options are: (a) the default MS-signed shim + MOK --
+MOK works, but Microsoft stays a trust root; or (b) for own-key sovereignty WITH
+MOK, keep shim but make it verifiable under your keys -- either RE-SIGN
+`shimx64.efi` with your own `db` key (paying a re-sign-shim-on-every-update cost),
+or adopt a Debian-CA-signed shim (Debian bug #1102680) and enroll that CA in `db`.
+Either way shim stays, so MOK and the kernel `.machine` keyring keep working and
+dm-verity can still anchor via MOK/`.machine` (the default path) rather than
+being forced onto `.platform`. The tradeoff to accept, then, is the shim
+maintenance step -- not dropping shim; hash-pinning shim is the fragile option to
+avoid.
 
 
 ## Empirically settled (sandbox, Debian trixie)
@@ -435,7 +471,10 @@ Garden Linux, Fedora sealed) actually deliver.
 Offer **Anchor 2 (prevention) -- Sovereign Boot** as the opt-in step up: own key
 hierarchy, MS certs into `dbx`, sign only your own UKIs, so no trusted artifact
 accepts an unsigned initrd. This is the strongest guarantee and aligns with
-Kicksecure's Sovereign Boot work; it costs out-of-the-box compatibility.
+Kicksecure's Sovereign Boot work; it costs out-of-the-box compatibility. Because
+Kicksecure wants MOK to stay functional, this variant KEEPS shim (re-signed under
+the own key, or a Debian-CA-signed shim per bug #1102680) rather than dropping
+it -- dropping shim would remove MOK. See the key-ownership section.
 
 Do NOT rely on loader choice (GRUB vs systemd-boot) for confinement -- neither
 provides it on a Debian base. An own-signed GRUB + `check_signatures` closes only
@@ -501,3 +540,5 @@ closes.
 - dpkg per-file signing / DebSignatures (draft, stalled): https://wiki.debian.org/Teams/Dpkg/Spec/DebSignatures ; Fedora rpm-plugin-ima (the model Debian lacks): https://packages.fedoraproject.org/pkgs/rpm/rpm-plugin-ima/ ; ima-evm-utils (evmctl): https://packages.debian.org/sid/ima-evm-utils
 - MOK scope (shim validates bootloader+kernel+modules; .machine keyring for dm-verity): shim README https://github.com/rhboot/shim ; rodsbooks controlling Secure Boot https://www.rodsbooks.com/efi-bootloaders/controlling-sb.html ; kernel module signing https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; Ubuntu Secure Boot (MOK, module-signing-only KeyUsage OID) https://documentation.ubuntu.com/security/docs/security-features/platform-protections/secure-boot/
 - Sovereign Boot: Kicksecure wiki https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; Microsoft 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/
+- Shim is MS-CA-signed only; request for a Debian-CA-signed shim (keeps MOK without MS): Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys section https://www.kicksecure.com/wiki/Verified_Boot#Keys
+- Kernel key sources (.builtin distro key; .platform from UEFI db; .machine from MOK via shim) + dm-verity platform-keyring (sovereign/self-enrolled, no MOK): https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING

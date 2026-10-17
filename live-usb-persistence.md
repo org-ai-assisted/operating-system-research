@@ -301,6 +301,15 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
 6. Appliance model -- ship a pre-installed normal disk image. See below. This
    is the chosen direction.
 
+7. Self-inflating squashfs `.img` -- ship a PLAIN `.img` (dd-compatible, no
+   outer `.xz`) that is small because its rootfs is a squashfs INSIDE the image;
+   on first boot the initramfs (or a first-boot service) unpacks the squashfs
+   onto a plain rw root, deletes the squashfs, and grows root to fill the
+   device. Tempting because it hits all of small-download + plain-img +
+   zero-decompress-step + dd-compatible + normal-persistent-root at once. VERDICT:
+   viable but NOT recommended, and effectively un-trodden -- see "Self-inflating
+   squashfs" below.
+
 
 ## Decision for Kicksecure/Whonix: the appliance model
 
@@ -409,6 +418,60 @@ NOT decompressed by: plain `dd` alone, and VirtualBox's
 `VBoxManage convertfromraw` (the G5 path), which needs an uncompressed raw
 image -- so `.img.xz` still costs those users a manual `xz -d`.
 https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/vboxmanage-convertfromraw.html
+
+### Self-inflating squashfs (approach 7): tempting, not recommended
+
+The idea: ship a PLAIN `.img` (no outer `.xz`, dd-compatible) that is small
+because its rootfs is a squashfs stored INSIDE the image; on first boot, unpack
+the squashfs onto a plain read-write root, delete the squashfs, and grow root to
+fill the device. On paper it satisfies G1 + G2 + G5 + G6 + G7 together, which
+nothing else does. In practice it is viable but carries real cost, and -- a
+strong signal -- no mainstream project actually ships it.
+
+- NO PRIOR ART for the exact pattern (a squashfs unpacked IN PLACE to a plain rw
+  root on one self-inflating medium, squashfs then discarded). The closest are
+  block-level, from SEPARATE install media: SUSE KIWI OEM (`dd`-dumps a
+  compressed `.raw` disk image to the target, then `oem-resize` grows root) and
+  Clonezilla/partclone (compressed used-block fs-image restore + resize).
+  systemd-repart `CopyBlocks=auto` is the recognized "self-replicating image"
+  primitive but is RAW-block, not a compressed unpack. dracut `dmsquash-live`
+  keeps squashfs READ-ONLY with an overlay -- it never inflates to a plain root.
+  cloud-init / rpi `init_resize` / postmarketOS only GROW an already-plain fs;
+  that is not inflation. (Refs: systemd-repart.8, repart.d.5; KIWI
+  dracut-kiwi-oem-dump; squashfs-tools-ng benchmark; sigma-star erofs-vs-squashfs.)
+- MECHANISM MISMATCH is the crux: `unsquashfs` extracts a directory TREE to a
+  directory, not to a block device, so the flow must be mkfs -> mount ->
+  `unsquashfs -d` -> unmount. squashfs is a filesystem container, not a block
+  image, so it slots into NO stock block-level deployment primitive (dd,
+  `CopyBlocks=`, partclone). You hand-roll and maintain a bespoke dracut module
+  or first-boot service. systemd-repart only grows/adds partitions (never
+  shrinks/moves/deletes outside factory-reset), so the squashfs must live in a
+  TRAILING partition: inflate root, delete the trailing squashfs partition, grow
+  root into the reclaimed space.
+- FIRST-BOOT TIME is paid on the user's (often weak) device, not once on a build
+  host. Estimate for ~2 GB compressed -> ~6-8 GB root: NVMe/SATA-SSD with zstd
+  ~15-60 s; a good USB 3.0 stick ~2-4 min; a cheap USB 3.0 stick ~5-10 min. On
+  fast storage xz decompression is the bottleneck (prefer zstd/lz4); on slow USB
+  the write dominates and the compressor barely matters.
+- ROBUSTNESS REGRESSION: a power loss mid-inflate bricks first boot unless the
+  inflate is engineered idempotent/resumable -- worse than a plain flashed image,
+  which is atomic.
+- FDE/Secure Boot: LUKS is fine (inflate runs after unlock, into the encrypted
+  container; the staging squashfs is public plaintext). But embedding the
+  inflate tooling in the initramfs bloats it and, under a signed UKI, forces a
+  re-sign and changes measurements; a first-boot service avoids touching signed
+  artifacts but is itself unprotected.
+
+VERDICT: not recommended. The `.img.xz` + xz-aware flasher path (previous two
+sections) already delivers small download + plain persistent root with NO
+first-boot penalty and NO bespoke initramfs -- it decompresses on the build/flash
+host (fast, free, atomic) instead of on the slow target. The only property it
+lacks is that the STORED file is itself a bare dd-able image, and mainstream
+flashers eat `.xz` transparently, so that gap is largely cosmetic. Self-inflation
+trades a one-time host-side decompress for a per-user first-boot decompress plus
+a bespoke, brittle module -- a worse trade for this feature. (It is a genuinely
+different thing from verity-split-root, which keeps root immutable by design and
+so is not a substitute here.)
 
 ### Full-disk-encryption fork
 

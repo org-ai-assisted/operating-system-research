@@ -26,6 +26,13 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   an ISO to the virtual DVD/optical device and boot it.
 - G6 -- Small download: high compression of the shipped artifact (squashfs/XZ
   is the strongest option).
+- G7 -- Usability: NO extra user step from compression. The artifact must flash
+  or boot with the tool the user already uses, with no manual `xz -d` unwrap
+  first. This is not anti-compression -- it is pro-usability: compression is
+  wanted, but a wrapper the user has to unpack by hand is the thing to avoid. If
+  the flashing/boot tool read xz natively (balenaEtcher and Raspberry Pi Imager
+  do; `dd` and `VBoxManage convertfromraw` do not), `.img.xz` would satisfy G6
+  and G7 at once.
 
 ### The conflicts
 
@@ -57,10 +64,25 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
     G5 + G6 together with persistence, at the cost of no longer being a plain
     "normal install."
 
-Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) are mutually
-exclusive with the plain-normal-persistent-FDE-install appliance in the Decision
-below, UNLESS the design moves to the verity-split-root model, which reconciles
-them but is not a plain install.
+- G6 vs G7 -- in tension for a raw disk image. A raw `.img` is zero-extra-step
+  but large (it is the full partition size, not the used size; zstd compresses
+  the data at REST inside the fs, but the file a user downloads is still the
+  whole partition unless the FILE itself is compressed). Shrinking the DOWNLOAD
+  means compressing the file (`.img.xz`), which is transparent only to flashers
+  with native xz support; plain `dd` and VirtualBox's `convertfromraw` (G5) then
+  need a manual `xz -d` first -- the extra step G7 rejects. The read-only-medium
+  artifacts dodge this cleanly: a squashfs-based ISO ships compressed AND boots
+  directly from the DVD device with no decompress step, satisfying G5 + G6 + G7
+  at once -- but only amnesic, no G1/G2. So "small download AND zero extra step
+  AND persistence" again points at the verity-split-root model (a compressed
+  read-only `/usr` shipped as-is plus writable LUKS state), not a raw
+  ext4/btrfs `.img`.
+
+Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) and the
+zero-extra-step usability goal (G7) are mutually exclusive with the
+plain-normal-persistent-FDE-install appliance in the Decision below, UNLESS the
+design moves to the verity-split-root model, which reconciles them but is not a
+plain install.
 
 
 ## The core constraint: whole-disk iso9660 blocks in-place partitioning
@@ -285,9 +307,17 @@ btrfs-zstd does not match squashfs-XZ's ratio (XZ read-only large-block is
 more aggressive), so the running footprint is larger than the squashfs image
 -- but far smaller than uncompressed ext4, and read-write, which squashfs
 never is. Download size is kept by shipping `.img.xz` (free space compresses
-away); the "extra decompress step" is avoided because mainstream flashers
-(balenaEtcher, Raspberry Pi Imager, GNOME Disks, `bmaptool` with a `.bmap`)
-decompress on the fly during flash.
+away). The "extra decompress step" (G7) is avoided ONLY for flashers that read
+xz natively -- balenaEtcher and Raspberry Pi Imager decompress on the fly, and
+GNOME Disks "Restore Disk Image" and `bmaptool` with a `.bmap` handle an xz
+source too. It is NOT avoided for plain `dd` or for VirtualBox's
+`VBoxManage convertfromraw` (G5's path), both of which need an uncompressed
+`.img` and so force a manual `xz -d` first. So `.img.xz` trades download size
+against a one-command unwrap for exactly the raw-`dd`/VirtualBox users; whether
+that is acceptable is the open G6-vs-G7 call, not a solved "no regression." A
+truly zero-step compressed artifact exists only on the read-only-medium side (a
+squashfs ISO boots compressed with no unwrap), which cannot persist -- see the
+Goals conflicts.
 
 ### Full-disk-encryption fork
 

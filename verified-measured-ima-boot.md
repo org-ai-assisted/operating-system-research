@@ -7,7 +7,7 @@ and initrd to Debian, keeping legacy BIOS as a fallback, and staying on a road
 that can reach remote attestation later?
 
 This note states the problem, records three facts that reframe it, surveys how
-the major projects solve it (named, with citations), lays out the two viable
+the major projects solve it (named, with citations), lays out the viable
 designs, reports what was empirically settled in a sandbox, and records the
 recommended direction. It is the successor to the "measured/sealed boot chain"
 limitation flagged at the end of [live-usb-persistence.md](live-usb-persistence.md).
@@ -27,8 +27,10 @@ sibling note.
    its own GPG verifier), not a signing-gap decision. TESTED (see below).
 
 2. **A Unified Kernel Image (UKI) does NOT take the kernel away from Debian.**
-   `ukify`/`mkosi-initrd` wrap Debian's STOCK `vmlinuz` + STOCK initrd into one
-   signed PE binary. You still run Debian's kernel; you never maintain a kernel.
+   `ukify` wraps Debian's STOCK `vmlinuz` and (via `--initrd=/boot/initrd.img-*`)
+   Debian's STOCK initrd into one signed PE binary. (`mkosi-initrd` instead
+   builds a FRESH initrd, not the stock one, so it is not the way to keep
+   Debian's initramfs.) You still run Debian's kernel; you never maintain a kernel.
    What a UKI takes over is bundling-and-signing the initrd + cmdline -- which
    must be done anyway (fact 3). So "leaves the kernel to Debian" is NOT a
    differentiator between the UKI and no-UKI designs; both ride Debian's kernel.
@@ -42,10 +44,18 @@ sibling note.
    unsigned-initrd gap is the whole reason the UKI exists.
 
 The practical invariant that follows: whatever the design, Kicksecure will
-(a) own an X.509 signing key, (b) enroll it via MOK into the `.machine` keyring
-(stock trixie: `CONFIG_INTEGRITY_MACHINE_KEYRING=y`, `CONFIG_INTEGRITY_CA_MACHINE_KEYRING`
-unset, so a plain leaf cert is accepted -- no CA, no kernel rebuild), and
-(c) run a `postinst`/kernel/initramfs hook that re-signs on every update.
+(a) own an X.509 signing key; (b) enroll it via MOK. A normal `mokutil --import`
+(a leaf cert, no module-signing-only KeyUsage OID) makes shim trust that key to
+validate the bootloader, the UKI AND the kernel it loads -- the full boot chain,
+not just modules. To ALSO anchor a dm-verity roothash signature in-kernel, the
+owner must additionally run `mokutil --trust-mok`, which admits the key to the
+trusted `.machine` keyring (linked into `.secondary`); trixie's shipped kernel
+already has the compile-time gates (`CONFIG_INTEGRITY_MACHINE_KEYRING=y`,
+`CONFIG_INTEGRITY_CA_MACHINE_KEYRING` unset so a leaf cert is accepted,
+`CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` + `..._SECONDARY_KEYRING=y`, read from
+`/boot/config`), so only the `--trust-mok` runtime step is needed -- no kernel
+rebuild. And (c) run a `postinst`/kernel/initramfs hook that re-signs on every
+update.
 
 
 ## How the major projects solve it
@@ -65,7 +75,7 @@ writable areas.
 | Android AVB | OEM/SoC bootloader | dm-verity | signed, rollback-protected vbmeta | vendor | no |
 | ChromeOS | depthcharge | dm-verity | roothash on cmdline, signed in kernel-partition preamble | vendor | no |
 | Flatcar | shim -> GRUB | dm-verity (/usr) | roothash in GRUB-verified signed load scripts | optional | no |
-| Microsoft Azure Linux | GRUB | dm-verity | `verity.roothash=` on GRUB cmdline, signed boot chain | - | no |
+| Microsoft Azure Linux | GRUB | dm-verity | roothash on GRUB cmdline (Mariner `rd.verityroot.roothash=`), signed boot chain | - | no |
 | Talos | GRUB (BIOS) / systemd-boot+UKI (UEFI) | read-only squashfs in signed UKI | signed UKI | PCR 11 + 7 | no |
 | Garden Linux | systemd-boot (UEFI only) | EROFS rootfs in signed UKI (rejected dm-verity) | signed UKI | PCR 11 | no |
 | Vanilla OS 2 / ABRoot | GRUB (two-stage) | A/B OCI image (consistency, not verity) | n/a | - | no |
@@ -109,38 +119,89 @@ Fedora/ostree-centric and still experimental, whereas dm-verity over
 squashfs/erofs is well-trodden in Debian live and in verity-squash-root.
 
 
-## The two viable designs for Kicksecure
+## The viable designs for Kicksecure
 
-The choice is NOT "GRUB vs UKI" -- GRUB can CHAINLOAD a signed UKI. It is:
+The requirement is subtler than it first looks: verified boot needs boot
+CONFINED to the signed artifact, not merely that the signed artifact verifies
+when it is chosen. An empirical test (below) confirmed that `shim -> Debian's
+signed GRUB -> a signed UKI` chainload verifies and refuses a tampered UKI. That
+is necessary but NOT sufficient: **Debian's stock signed GRUB cannot confine
+boot to the UKI.** Its `grubx64.efi` has `linux`/`initrd` built in, ships no
+`pgp`/`verify` module, and reads an UNSIGNED `/EFI/debian/grub.cfg`; `shim_lock`
+validates only the kernel PE. So an attacker (or anyone at the `e` menu)
+rewrites grub.cfg to `linux` the Debian-signed kernel with an attacker-controlled
+initrd -- Secure Boot still on, the UKI never executed. The signed-roothash
+kernel feature does not save this: a hostile initrd simply never activates
+verity and pivots elsewhere. So "ride Debian's prebuilt GRUB and chainload a UKI"
+is NOT a verified-boot config. That leaves two real designs plus one non-answer:
 
-**Path A -- shim (Debian) -> Debian's signed GRUB -> your signed UKI.**
-- Rides Debian's prebuilt signed shim + GRUB; no own GRUB build.
-- `ukify` bundles Debian's stock kernel + initrd; you sign the UKI with your key
-  (MOK/db enrolled). Initrd protection is BUNDLED (robust).
-- dm-verity roothash on the UKI's signed cmdline (the "sign the carrier" model).
-- Measured boot: systemd-stub measures the UKI into PCR 11 (deterministic).
-- BIOS: the same GRUB loads extracted Debian kernel + initrd (a UKI cannot
-  execute on BIOS); verity-at-rest only, no Secure Boot, no measured boot.
-- Least new Kicksecure code. Matches Talos, Kairos, Garden Linux, Fedora sealed.
+**Option 1 (idiomatic, recommended) -- shim -> Debian's signed systemd-boot ->
+your signed UKI.** systemd-boot has no bare-kernel/`initrd` command: it loads
+only PE binaries (UKIs), each shim-verified, so boot IS confined to signed UKIs.
+Debian trixie now ships a shim-signed systemd-boot (fact 1), so this needs no
+own-build and the original reason to prefer GRUB is moot. `ukify` bundles
+Debian's stock kernel+initrd; you sign the UKI with your MOK-enrolled key; the
+dm-verity roothash rides the UKI's signed cmdline; systemd-stub measures PCR 11
+(deterministic). GRUB stays only as the degraded BIOS loader. This is exactly how
+Talos, Kairos, Garden Linux and Fedora sealed images load their UKIs -- via
+systemd-boot, NOT GRUB.
 
-**Path B -- shim -> your OWN signed GRUB (GPG) -> Debian kernel + initrd.**
-- You MUST build and sign your own GRUB `core.img` with the `pgp`+`verify`+`tpm`
-  modules built in, a GRUB password + lockdown (to kill the `set
-  check_signatures=no` console bypass), and your pubkey embedded (the pubkey
-  must live in the shim-verified PE, so Debian's prebuilt GRUB cannot carry it).
-- GRUB enforces `check_signatures=enforce` over detached signatures of kernel,
-  initrd, and grub.cfg -- the GRUB-native way to close the initrd gap without a
-  UKI. Historically unreliable as a distro default (Debian bug #906124: an image
-  with `linux` but not `pgp` is a bypass) and exposed to the console bypass.
-- dm-verity roothash on the signed grub.cfg cmdline.
-- Measured boot: GRUB's `tpm` module into PCR 8/9 (noisy, non-precomputable).
-- Matches Flatcar, Azure Linux, ChromeOS (the carrier-is-signed half).
+**Option 2 (keeps GRUB on UEFI) -- shim -> your OWN signed GRUB (GPG) -> Debian
+kernel + initrd.** The ONLY way to keep GRUB as the UEFI loader AND close the
+gap: build+sign your own `grubx64.efi` with `pgp`+`verify`+`tpm` built in, your
+pubkey embedded (it must live in the shim-verified PE -- Debian's prebuilt GRUB
+cannot carry it), a GRUB password, and `check_signatures=enforce` over
+grub.cfg+kernel+initrd, so grub.cfg and the initrd are finally signature-checked.
+dm-verity roothash on the signed grub.cfg cmdline. Historically fragile (Debian
+bug #906124: a core with `linux` but not `pgp` is a bypass) and the console `set
+check_signatures=no` must be locked out. Measured boot via GRUB's `tpm` module
+into PCR 8/9 (noisy, non-precomputable). Matches Flatcar/Azure/ChromeOS
+(carrier-is-signed). Cost: you own a GRUB build + key.
 
-`CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` is DEFENSE-IN-DEPTH in either path, never
-the anchor: a tampered initrd can simply not activate verity and pivot
+**Non-answer -- shim -> Debian's signed GRUB -> signed systemd-boot/UKI.**
+Tempting, because it keeps Debian's prebuilt GRUB as the first stage. It does
+NOT close the gap: the same unsigned grub.cfg + built-in `linux`/`initrd` let an
+attacker skip systemd-boot and boot the signed kernel with an evil initrd.
+Keeping Debian's stock GRUB anywhere in front of the kernel reintroduces the hole
+unless grub.cfg is itself signed -- which is Option 2. Not a real third option.
+
+`CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` is DEFENSE-IN-DEPTH in either option,
+never the anchor: a tampered initrd can simply not activate verity and pivot
 elsewhere, so the kernel-keyring check only prevents a forged-but-"verified"
 rootfs substitution, not "the system actually uses the signed root." The anchor
-is whatever signs the initrd + cmdline.
+is whatever CONFINES boot and signs the initrd+cmdline -- systemd-boot+UKI
+(Option 1) or own-GRUB+`check_signatures` (Option 2).
+
+
+## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
+
+The default key strategy and Sovereign Boot live at different layers and are
+selected by the owner, so Kicksecure can offer BOTH:
+
+- **Default -- MS-signed shim + additive MOK.** Debian's shim is
+  Microsoft-signed, so it boots on the large installed base of SB-enabled
+  machines that trust the MS keys, and shim ALSO consults the MOK list. The owner
+  enrolls their own key with `mokutil --import` WITHOUT removing any Microsoft or
+  Debian key -- purely additive. This is the light form of owner control and the
+  mode the designs above assume (the MOK key signs the UKI / own GRUB).
+- **Sovereign Boot (opt-in, heavy) -- take ownership.** The 3mdeb/Dasharo
+  provisioning wizard is the full feudal-to-sovereign step: it forces Setup Mode,
+  DELETES the platform key `PK`, wipes KEK/db, pushes the Microsoft certificates
+  into `dbx` (so nothing MS-signed boots), enrolls only the owner's keys into db,
+  and re-takes ownership with a fresh ephemeral `PK`. The owner's key becomes the
+  sole trust root.
+
+They conflict only at the strict end, and the resolution is a spectrum, not one
+config: ship MS-shim-compatible by default (works everywhere; additive MOK for
+owners who want to sign their own UKIs/kernels), and present full Sovereign Boot
+as a deliberate owner-driven migration. Full sovereignty has real costs -- the
+MS-signed shim itself lands in `dbx` and becomes unusable, so the whole chain
+must be signed by the owner's key, and dual-boot / vendor recovery /
+firmware-capsule paths that rely on MS signatures break. It also sidesteps the
+mid-2026 Microsoft 2011-CA expiry (the replacement UEFI CA 2023 must reach each
+machine's db via firmware/OS updates; an owner who roots trust only in their own
+db does not depend on that rotation). Status: Sovereign Boot is RC/demo-stage
+(3mdeb spec v0.1.0), not a shipped default.
 
 
 ## Empirically settled (sandbox, Debian trixie)
@@ -168,7 +229,11 @@ TESTED.
   (`KERNELVER=6.12.111+deb13-amd64`); systemd-stub measured all UKI sections
   (`.linux`, `.osrel`, `.cmdline`, `.initrd`, `.uname`, `.sbat`) into PCR 11.
   Negative control: one flipped byte in the signed UKI -> `error: bad shim
-  signature`, kernel never started. Verification is real, not bypassed.
+  signature`, kernel never started. This proves signature enforcement on the UKI
+  PATH is real -- but NOT that boot is confined to that path: with Debian's stock
+  GRUB the unsigned grub.cfg still lets an attacker bypass the UKI and boot the
+  Debian-signed kernel with an evil initrd (see "The viable designs"). The test
+  validates the chosen path, not path confinement.
 
 Versions tested: grub-efi-amd64-signed 1+2.12+9+deb13u2, shim-signed
 1.51~1+deb13u1+16.1-2~deb13u1, systemd/ukify/systemd-boot-efi 257.13-1~deb13u1,
@@ -180,7 +245,10 @@ only); trust was established via the UEFI `db` route (a sanctioned equivalent),
 so the interactive MokManager UI path was not separately exercised (high
 confidence it behaves identically). Debian's signed-grub prefix is `/EFI/debian`.
 
-Net: Path A is validated on stock Debian trixie, not merely plausible.
+Net: signature enforcement on the UKI path, and GRUB's PCR 8/9 measurement, are
+validated on stock trixie. Path CONFINEMENT is the separate requirement the
+design section resolves -- it needs systemd-boot (Option 1) or an own-signed
+GRUB (Option 2), because stock Debian GRUB does not provide it.
 
 
 ## Measured boot for remote attestation
@@ -190,22 +258,31 @@ is only a problem for LOCAL sealing (binding a secret to a golden PCR). In
 attestation the verifier REPLAYS the event log against the TPM quote after the
 fact, so unpredictable-but-logged PCRs are fine:
 
-1. `TPM2_Quote` returns a signed structure over selected PCRs + a verifier
-   nonce, signed by an Attestation Key tied to the Endorsement Key.
-2. The logs explain the opaque PCRs: the UEFI TCG2 event log (PCRs 0-7), GRUB's
+1. At ENROLLMENT the verifier binds an Attestation Key (AK) to the TPM's
+   Endorsement Key (EK) via credential activation (`TPM2_MakeCredential` /
+   `ActivateCredential`). A `TPM2_Quote` signature ALONE does not prove the AK
+   belongs to a real TPM, so this binding step is mandatory -- omit it and a
+   software key can forge a quote.
+2. `TPM2_Quote` returns a structure over selected PCRs + a verifier nonce,
+   signed by the enrolled AK.
+3. The logs explain the opaque PCRs: the UEFI TCG2 event log (PCRs 0-7), GRUB's
    PCR 8/9, the IMA log (PCR 10).
-3. The verifier checks the quote signature and nonce, replays each log entry
-   (`PCR = H(PCR || digest)`), compares to the quoted values, then applies
-   policy to the now-trusted log contents.
+4. The verifier checks the quote signature (against the enrolled AK) and nonce,
+   then REPLAYS the logs: for each event it recomputes the digest FROM the event
+   body, folds `PCR = H(PCR || digest)` in order (skipping non-extended
+   `EV_NO_ACTION` records such as the Spec ID event), and checks the result
+   equals the quoted PCRs. Recomputing from the body is what catches a tampered
+   event; only then is the log content trusted.
 
 Keylime implements exactly this (quote over PCRs + `binary_bios_measurements` +
 the IMA log; a measured-boot policy and a runtime IMA policy). GRUB on EFI
 extends PCR 8/9 through the firmware's `EFI_TCG2_PROTOCOL HashLogExtendEvent`,
 so a verifier sees firmware + Secure Boot + GRUB in one continuous log.
 
-Path A gives the cleaner PCR 11 as well (better reference-state stability than
-PCR 8/9). Either way the attestation MODEL is sound; the roughness in the GRUB
-PCR 8/9 path is operational (brittle reference state), not theoretical.
+Option 1 (systemd-boot + UKI) gives the cleaner PCR 11 as well (better
+reference-state stability than PCR 8/9). Either way the attestation MODEL is
+sound; the roughness in the GRUB PCR 8/9 path is operational (brittle reference
+state), not theoretical.
 
 ### Prior art on a Debian base (as of 2026-10): greenfield
 
@@ -245,6 +322,22 @@ documented feature. So the attestation goal means packaging/integrating Keylime
   `rpm-plugin-ima` (file signatures in the RPM header, `security.ima` written at
   install) -- Debian has no equivalent, which is exactly why appraisal is
   impractical on a rolling Debian system.
+- **A dpkg hook could retrofit `security.ima`, but only as local-hash
+  integrity.** A `DPkg::Post-Invoke` hook walking `dpkg-query -L` and calling
+  `evmctl` (from the packaged `ima-evm-utils`) can set `security.ima` on
+  dpkg-owned files -- mechanically feasible on stock Debian, and the only path
+  given the missing native support. But it yields integrity / offline-tamper-at-
+  rest only (a local hash, or a local/TPM-sealed key), NOT vendor authenticity:
+  Debian's build infra signs no file contents, so the hook certifies "what dpkg
+  unpacked on this box," not "what Debian built and signed" -- a package
+  compromised at/before install is faithfully signed. It also covers only the
+  dpkg-owned subset: every non-dpkg path (generated config, logs, runtime data,
+  the locally built initramfs) must be excluded or path-whitelisted by the IMA
+  policy, which is where the real operational cost and breakage risk live. EVM
+  (`security.evm`, key ideally TPM-sealed) must protect the xattrs. Defensible
+  as a defense-in-depth at-rest layer beside dm-verity + FDE; not a substitute
+  for provenance, and not to be advertised as vendor-verified. Nobody ships this
+  on stock Debian.
 
 
 ## Installed system: verity root + working apt
@@ -305,9 +398,11 @@ the kernel/initrd. The relevant facts:
   integrity at REST. But BIOS runs the MBR with NO signature check, so
   `core.img`, `grub.cfg`, kernel and initrd are all unverified; a medium rewrite
   defeats it. A UKI cannot execute on BIOS.
-- **Measured boot on BIOS is effectively unavailable:** commodity legacy BIOS
-  has no trustworthy SRTM, no standardized TCG event log (so pcrlock/pcr-oracle
-  cannot work), no Secure Boot state in PCR 7.
+- **Measured boot on BIOS is effectively unavailable:** the TCG PC Client
+  firmware-log format does cover conventional BIOS, but commodity legacy BIOS
+  rarely implements a trustworthy measured-boot SRTM, exposes no reliable event
+  log, and has no Secure Boot state in PCR 7 -- so pcrlock/pcr-oracle
+  precomputation and a trustworthy root of trust are absent in practice.
 
 So BIOS is documented as an explicitly reduced-integrity path: verity-at-rest
 only, no Secure Boot, no measured boot, not marketed as "verified boot."
@@ -315,27 +410,37 @@ only, no Secure Boot, no measured boot, not marketed as "verified boot."
 
 ## Recommended direction
 
-Adopt **Path A** (shim -> Debian signed GRUB -> your signed UKI) on UEFI, with
-GRUB loading extracted Debian kernel+initrd as the degraded BIOS entry. It keeps
-GRUB (one loader for both firmwares), leaves the kernel+initrd to Debian
-(`ukify` only bundles them), needs no own GRUB build, closes the initrd gap
-robustly (bundled), and gives deterministic PCR 11 -- the better substrate for
-the remote-attestation goal. It is empirically validated on stock trixie.
+Adopt **Option 1** -- `shim -> Debian's signed systemd-boot -> your signed UKI`
+on UEFI, with GRUB kept only as the degraded BIOS loader. It confines boot to
+signed UKIs (systemd-boot has no bare-kernel command), rides Debian's now-signed
+systemd-boot (no own-build), leaves the kernel+initrd to Debian (`ukify` only
+bundles them), bundles+signs the initrd, puts the dm-verity roothash on the UKI's
+signed cmdline, and gives deterministic PCR 11 -- the better substrate for the
+remote-attestation goal. It is how the comparable projects (Talos, Kairos, Garden
+Linux, Fedora sealed) actually load UKIs.
 
-Path B (own signed GRUB, GPG-enforced detached signatures, no UKI) is the right
-choice ONLY if a UKI artifact is refused on principle and the cost of owning a
-GRUB build is accepted; it matches Flatcar/Azure and is legitimate, just more
-new code and a weaker initrd story.
+Choose **Option 2** (own signed GRUB + `check_signatures`) only if keeping GRUB
+as the UEFI loader is a hard requirement -- it is the sole way to do that AND
+close the initrd gap, at the cost of owning a GRUB build + key and a noisier
+PCR 8/9 measured-boot story.
 
-Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM
-to a frozen-appliance scope until Debian gains package-level file signing.
+Do NOT keep Debian's stock GRUB in front of the kernel on the verified path: its
+unsigned grub.cfg + built-in `linux`/`initrd` reintroduce the gap regardless of
+what it chainloads. (The earlier draft's "ride Debian's stock GRUB -> UKI" is
+withdrawn for exactly this reason.)
+
+Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM,
+or a local-hash dpkg hook, to a frozen-appliance scope until Debian gains
+package-level file signing.
 
 
 ## Open product decisions
 
-- **Path A (GRUB -> signed UKI) vs Path B (GRUB-GPG, no UKI anywhere).** Given
-  "UKI not required but GRUB preferred," Path A delivers both and is recommended
-  unless a hard "no UKI artifact" rule applies.
+- **Option 1 (systemd-boot + UKI) vs Option 2 (own signed GRUB).** systemd-boot
+  is recommended now that Debian signs it; choose Option 2 only if GRUB on the
+  UEFI path is mandatory. Note this is a change from an earlier draft that
+  recommended riding Debian's stock GRUB to chainload a UKI -- that does not
+  confine boot and was withdrawn.
 - **Rollback: keep the single backup copy, or move to A/B verity slots?**
   (A/B recommended.)
 - **IMA appraisal: ever, or measurement-only indefinitely?** Gated on Debian's
@@ -380,3 +485,6 @@ closes.
 - IMA concepts/policy: https://ima-doc.readthedocs.io/en/latest/ima-concepts.html ; https://ima-doc.readthedocs.io/en/latest/ima-policy.html ; Keylime: https://keylime.dev ; https://keylime.readthedocs.io/en/latest/user_guide/use_measured_boot.html
 - Debian IMA/EVM per-file-signing gap (acknowledged, unresolved): debhelper bug #766267 https://bugs.debian.org/766267 ; apt bug #823945 https://bugs.debian.org/823945 ; apt-devel patch thread https://lists.debian.org/deity/2016/05/msg00034.html ; Keylime install (RHEL/SUSE only) https://keylime.readthedocs.io/en/latest/installation.html
 - Debian-base remote attestation prior art: Ubuntu confidential VMs on Azure https://ubuntu.com/blog/ephemeral-ubuntu-confidential-vms-azure ; Azure guest attestation https://learn.microsoft.com/azure/confidential-computing/guest-attestation-confidential-vms ; SUSE SLE Micro attestation (mature comparator) https://documentation.suse.com/sle-micro/5.5/html/SLE-Micro-all/cha-security-attestation.html
+- dpkg per-file signing / DebSignatures (draft, stalled): https://wiki.debian.org/Teams/Dpkg/Spec/DebSignatures ; Fedora rpm-plugin-ima (the model Debian lacks): https://packages.fedoraproject.org/pkgs/rpm/rpm-plugin-ima/ ; ima-evm-utils (evmctl): https://packages.debian.org/sid/ima-evm-utils
+- MOK scope (shim validates bootloader+kernel+modules; .machine keyring for dm-verity): shim README https://github.com/rhboot/shim ; rodsbooks controlling Secure Boot https://www.rodsbooks.com/efi-bootloaders/controlling-sb.html ; kernel module signing https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; Ubuntu Secure Boot (MOK, module-signing-only KeyUsage OID) https://documentation.ubuntu.com/security/docs/security-features/platform-protections/secure-boot/
+- Sovereign Boot: Kicksecure wiki https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; Microsoft 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/

@@ -47,6 +47,17 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   than ISO-on-DVD, but a single documented command. The ISO-on-DVD flow stays
   available only for the LIVE/try/installer ISO (amnesic, or Calamares-installs
   to a separate virtual disk) -- which is not the persistent artifact.
+  - Installer-test safety, a point FOR the ISO: booting the Calamares installer
+    from a virtual DVD drive keeps the install SOURCE (the read-only optical
+    ISO) physically distinct from the install TARGET (a blank virtual hard
+    disk). Calamares cannot offer the read-only DVD as a destination, so the
+    user cannot accidentally wipe or install onto the installer medium itself.
+    If the installer instead shipped as a VDI/VMDK/OVA (a virtual HARD DISK),
+    the installer medium and the target would both appear as disks in
+    Calamares' partition step, inviting a mistaken pick of the installer disk.
+    So the ISO/virtual-DVD medium is the safer, more familiar way to TEST the
+    Calamares installer -- a reason to keep the installer path on the ISO,
+    separate from the pre-installed persistent `.img`.
 
 - G6 (squashfs) vs G1/G2 -- IMPOSSIBLE as a single root. squashfs is read-only
   and immutable; it can be neither a writable persistent root nor a writable

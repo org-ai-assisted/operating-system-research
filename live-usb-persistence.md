@@ -18,8 +18,9 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
 
 - G1 -- Persistent whole root that behaves like a normal install (logs, state,
   packages, home all survive reboot).
-- G2 -- Full-disk encryption of the whole root (not only `/home`); encryption
-  the default.
+- G2 -- Full-disk encryption of the whole root (not only `/home`) available;
+  the default is a CHOICE, not a silent on-or-off -- first boot asks the user
+  to encrypt or not, rather than deciding for them.
 - G3 -- Optional second disk as extra persistence via the same label.
 - G4 -- Amnesic ON DEMAND (`grub-live`), not amnesic by default.
 - G5 -- Easy to test in VirtualBox via the flow most users already know: attach
@@ -257,10 +258,11 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
 ## Decision for Kicksecure/Whonix: the appliance model
 
 Requirements that shaped the choice: whole-root persistence that behaves like
-a normal install; full-disk encryption (not just `/home`); encryption the
-default; a second disk as an option; and -- a late reframing -- amnesic boot
-is NOT required as the default, because `grub-live` already provides
-amnesic-on-demand from the GRUB menu on any installed system.
+a normal install; full-disk encryption (not just `/home`) available, with the
+encrypt-or-not decision left to the user as an explicit first-boot CHOICE (not
+silently defaulted on or off); a second disk as an option; and -- a late
+reframing -- amnesic boot is NOT required as the default, because `grub-live`
+already provides amnesic-on-demand from the GRUB menu on any installed system.
 
 Given that, the live-overlay models (3, 4) are the wrong frame. The chosen
 design ships a PRE-INSTALLED normal Kicksecure disk image (`.img`, the same
@@ -330,6 +332,10 @@ per-user FDE, asymmetric because of how cryptsetup works:
   on the live mounted root.
 - Data reencryption (`cryptsetup reencrypt --encrypt`/`--decrypt`): offline
   and slow -- cannot run on the mounted root; rewrites the data.
+
+Per G2 the first boot PRESENTS the encrypt-or-not choice either way; A and B
+differ only in the shipped starting state and therefore in which direction is
+the fast path (keyslot change) versus the slow one (full reencryption).
 
 Option A (recommended) -- ship the root already inside LUKS2 with a
 known/default keyslot that the initramfs unlocks automatically; FORCE the user

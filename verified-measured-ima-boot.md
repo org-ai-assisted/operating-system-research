@@ -274,6 +274,23 @@ binary cannot have two signatures" line is already marked outdated on the page;
 multi-signature is standards-blessed (UEFI authenticates an image if ANY
 cert-table signature chains to `db`, with nothing in `dbx`) and in production.
 
+Can you dodge the `dbx`-by-hash problem by just not applying revocations? Mostly
+NO, and the part that is yes you get for free. The real control is NOT a package
+but the KEK: a `dbx` write is an authenticated variable update that firmware
+accepts only if KEK-signed, so once a sovereign owner replaces or wipes the
+Microsoft KEK, Microsoft's `dbx` updates cannot be authorized at all -- MS
+revokes only MS-ecosystem binaries a sovereign machine never boots anyway, so
+those entries are genuinely moot (the "obsolete anyhow" intuition, correct for
+exactly this case). But (a) on Debian there is no dbx "package" to decline:
+revocations are applied by fwupd/LVFS (`org.uefi.dbx`), and application is already
+opt-in (`fwupd-refresh` only fetches metadata); `secureboot-db` is Ubuntu-only.
+(b) Any `dbx` entry ALREADY applied persists in firmware NVRAM (append-only, no
+downgrade) -- declining future updates does not remove it. (c) Deliberately
+skipping the revocation of YOUR OWN shim build to keep it bootable means running
+a bootloader with a known Secure Boot bypass -- a footgun; the sound fix is
+roll-forward to a fixed shim and re-dual-sign (the re-sign trigger), not freezing
+on a revoked build.
+
 Why MOK is the deciding factor (so shim is NOT optional): the case that forces it
 is user / out-of-tree KERNEL MODULE signing -- DKMS modules (VirtualBox, tcp-isn,
 CPU-info-leak, ...) signed today via `/var/lib/dkms/mok.key`. On a stock Debian

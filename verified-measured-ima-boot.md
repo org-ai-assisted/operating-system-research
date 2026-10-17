@@ -195,10 +195,12 @@ selected by the owner, so Kicksecure can offer BOTH:
   mode the designs above assume (the MOK key signs the UKI / own GRUB).
 - **Sovereign Boot (opt-in, heavy) -- take ownership.** The 3mdeb/Dasharo
   provisioning wizard is the full feudal-to-sovereign step: it forces Setup Mode,
-  DELETES the platform key `PK`, wipes KEK/db, pushes the Microsoft certificates
-  into `dbx` (so nothing MS-signed boots), enrolls only the owner's keys into db,
-  and re-takes ownership with a fresh ephemeral `PK`. The owner's key becomes the
-  sole trust root.
+  DELETES the platform key `PK`, wipes KEK/db, and pushes the Microsoft
+  certificates into `dbx` (the deny-list -- it OVERRIDES `db`, so adding MS there
+  forbids MS-signed binaries DURABLY, unlike merely dropping MS from `db`, which a
+  later firmware/vendor update or KEK-authorized `db` change could silently
+  re-add), enrolls only the owner's keys into db, and re-takes ownership with a
+  fresh ephemeral `PK`. The owner's key becomes the sole trust root.
 
 They conflict only at the strict end, and the resolution is a spectrum, not one
 config: ship MS-shim-compatible by default (works everywhere; additive MOK for

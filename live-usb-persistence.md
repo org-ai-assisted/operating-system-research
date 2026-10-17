@@ -523,6 +523,57 @@ Calamares FDE install), so no amnesic-first artifact is required. A genuine
 "convert to a clean FDE install" path remains available via `toram` +
 Calamares from the ISO, separate from this feature.
 
+### Testing in VirtualBox
+
+Three ways to test, from least to most confusable about which disk the installer
+targets:
+
+1. ISO on the virtual DVD drive (BEST, and the familiar flow). The source is a
+   read-only optical device; Calamares cannot offer it as a destination, so the
+   wrong-target mistake is impossible. This is the installer/try path (the ISO
+   artifact), not the persistent `.img`.
+2. The `.img` as a virtual USB/removable device (MIDDLE -- mirrors a physical
+   USB-boot + install-to-internal-disk, and the removable medium is still
+   distinguishable from the fixed target). Possible in VirtualBox 7.x WITHOUT
+   `convertfromraw`, but EFI-ONLY:
+   - VirtualBox 7.x has a real USB storage controller; each disk attached to it
+     "appears as a dedicated USB device to the guest." But: "Booting from drives
+     attached using USB is only supported when EFI is used as the BIOS lacks USB
+     support" (official 7.x manual, storage.html) -- so EFI firmware is
+     mandatory for this path.
+   - Attach the `.img` with NO data copy via a hand-written flat-extent VMDK
+     descriptor (`createType="monolithicFlat"`, one `RW <sectors> FLAT
+     "image.img" 0` extent) -- the descriptor references the `.img` in place. The
+     documented `createmedium --variant RawDisk --property RawDrive=` is for
+     PHYSICAL device nodes (`/dev/sdX`), not a file, so the flat descriptor is
+     the file route.
+   - Sketch (EFI on; USB controller bootable; blank VDI target on SATA):
+         VBoxManage modifyvm   "TestVM" --firmware efi
+         VBoxManage storagectl "TestVM" --name usb0  --add usb --bootable on
+         VBoxManage storageattach "TestVM" --storagectl usb0 --port 0 --device 0 \
+            --type hdd --medium /abs/image.vmdk --hotpluggable on
+         VBoxManage storagectl "TestVM" --name sata0 --add sata
+         VBoxManage storageattach "TestVM" --storagectl sata0 --port 0 --device 0 \
+            --type hdd --medium /abs/target.vdi
+     The `.img` then appears to the guest as removable USB; `target.vdi` as a
+     fixed internal disk. (`--hotpluggable`/`--nonrotational` only set hot-plug
+     and SSD hints -- they do NOT make a non-USB-controller disk removable; only
+     attaching to the USB controller does.)
+   - CONFIDENCE: the USB controller, the EFI-only USB-boot restriction, and the
+     RawDrive-is-physical-only facts are verbatim from the official 7.x manual.
+     The flat-VMDK-descriptor-for-a-file technique is a well-known community
+     method, NOT in the manual, and we have NOT yet run this recipe end to end
+     (there is no appliance `.img` built yet). Label it expected-not-tested until
+     verified.
+3. The `.img` as a plain virtual HARD DISK (WORST for installer testing): attach
+   the same flat-VMDK descriptor to SATA (no convertfromraw), or
+   `VBoxManage convertfromraw image.img image.vdi` (copies data). It boots under
+   BIOS or EFI, but presents as a FIXED disk indistinguishable from the target,
+   inviting a wrong-target pick in Calamares.
+
+For the persistent appliance `.img` itself (booting it as a normal install, no
+installer), any of the three attaches it; the USB or plain-disk route is fine.
+
 ### Artifacts
 
 - Ship the pre-installed `.img` (`.img.xz` + `.bmap`) for the persistent USB.

@@ -262,6 +262,20 @@ literally, but encryption is the slow path and there is a plaintext window.
 Encrypted-`/home`-only (the Fedora `home.img` parallel) was rejected: the
 requirement is full-disk encryption, not only `/home`.
 
+### Known limitation: unencrypted `/boot` is a tamper surface
+
+FDE on the root leaves `/boot` (and the ESP, `grub.cfg`, and initramfs)
+outside LUKS -- it must stay readable before the root is unlocked. A physical
+attacker with the stick can therefore tamper with the boot chain: edit the
+kernel command line (`init=/bin/sh`), or swap the initramfs to capture the
+LUKS passphrase at the next unlock. Debian's signed shim+GRUB verifies the
+kernel signature but NOT the initramfs or the `grub.cfg` body, so code signing
+alone does not close it. This is the same evil-maid surface every standard
+unencrypted-`/boot` FDE install has, accepted here for now ("full FDE except
+`/boot`"). The real mitigation is a measured/sealed boot chain (Secure Boot +
+TPM measurement, or a signed Unified Kernel Image), not a code change -- a
+candidate for a later iteration, documented as a known limitation until then.
+
 ### Amnesic mode
 
 `grub-live` alone covers the amnesic use case (confirmed working on a

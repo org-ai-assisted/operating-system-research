@@ -207,6 +207,21 @@ Path A gives the cleaner PCR 11 as well (better reference-state stability than
 PCR 8/9). Either way the attestation MODEL is sound; the roughness in the GRUB
 PCR 8/9 path is operational (brittle reference state), not theoretical.
 
+### Prior art on a Debian base (as of 2026-10): greenfield
+
+Remote attestation on a Debian base barely exists. Keylime -- the reference
+TPM-measured-boot + IMA remote-attestation stack -- is NOT packaged in Debian or
+Ubuntu (upstream supports only RHEL 9+ and SUSE SLE Micro; the one Ubuntu PPA is
+a dead 2021 personal build), and no Debian-derived security distro (Kicksecure,
+Whonix, Tails, PureOS) ships or documents it. The one genuinely deployed
+Debian-base case is cloud-tied: Ubuntu confidential VMs on Azure (vTPM + AMD
+SEV-SNP, attested to Microsoft Azure Attestation; GA for SEV-SNP, TDX in
+preview). Ubuntu Core/Desktop TPM-backed FDE does measured boot but only LOCAL
+key sealing, not verifier attestation. The mature OS-integrated comparator is
+SUSE SLE Micro, which ships Keylime (IMA + measured boot to a verifier) as a
+documented feature. So the attestation goal means packaging/integrating Keylime
+(or equivalent) ourselves -- there is no Debian-native path to inherit.
+
 
 ## IMA / EVM
 
@@ -221,6 +236,15 @@ PCR 8/9 path is operational (brittle reference state), not theoretical.
   unlabeled files that then fail appraisal. Workable only on a frozen,
   self-signed appliance image, not a rolling desktop. Scope it narrowly; do not
   put it on the general-purpose system until Debian gains package file signing.
+- **The gap is acknowledged but unresolved in the Debian BTS.** debhelper
+  #766267 (install `security.ima` xattrs at unpack) and apt #823945 (parse PAX
+  headers / restore xattrs on extraction, with a working patch) are both OPEN
+  and never merged: apt deferred to dpkg, which never implemented xattr/IMA
+  support. The effort was IBM-IMA-developer-driven (~2014-2016), not Debian
+  maintainers; there is no DEP. RPM solved the same problem with
+  `rpm-plugin-ima` (file signatures in the RPM header, `security.ima` written at
+  install) -- Debian has no equivalent, which is exactly why appraisal is
+  impractical on a rolling Debian system.
 
 
 ## Installed system: verity root + working apt
@@ -350,7 +374,9 @@ closes.
 - Flatcar secure boot: https://hackmd.io/@flatcar/H1MDJuu7lg ; Azure Linux read-only roots: https://mintlify.wiki/microsoft/azurelinux/security/read-only-roots
 - Talos SecureBoot: https://docs.siderolabs.com/talos/v1.13/platform-specific-installations/bare-metal-platforms/secureboot ; Kairos trusted boot: https://kairos.io/docs/architecture/trustedboot/ ; Garden Linux boot modes: https://github.com/gardenlinux/gardenlinux/blob/main/docs/explanation/boot-modes.md
 - Vanilla OS ABRoot: https://github.com/Vanilla-OS/ABRoot
-- GRUB digital signatures: https://www.gnu.org/software/grub/manual/html_node/Using-digital-signatures.html ; measured boot: https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124: https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; grub tpm-in-signed-core thread: https://lists.debian.org/pkg-grub-devel/2021/08/msg00039.html
+- GRUB digital signatures: https://www.gnu.org/software/grub/manual/html_node/Using-digital-signatures.html ; measured boot: https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124: https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; grub tpm-in-signed-core thread (Bug#846383): https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2021-August/017634.html
 - Debian grub signed-image modules: https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot: https://wiki.debian.org/SecureBoot
 - dm-verity (kernel): https://docs.kernel.org/admin-guide/device-mapper/verity.html
 - IMA concepts/policy: https://ima-doc.readthedocs.io/en/latest/ima-concepts.html ; https://ima-doc.readthedocs.io/en/latest/ima-policy.html ; Keylime: https://keylime.dev ; https://keylime.readthedocs.io/en/latest/user_guide/use_measured_boot.html
+- Debian IMA/EVM per-file-signing gap (acknowledged, unresolved): debhelper bug #766267 https://bugs.debian.org/766267 ; apt bug #823945 https://bugs.debian.org/823945 ; apt-devel patch thread https://lists.debian.org/deity/2016/05/msg00034.html ; Keylime install (RHEL/SUSE only) https://keylime.readthedocs.io/en/latest/installation.html
+- Debian-base remote attestation prior art: Ubuntu confidential VMs on Azure https://ubuntu.com/blog/ephemeral-ubuntu-confidential-vms-azure ; Azure guest attestation https://learn.microsoft.com/azure/confidential-computing/guest-attestation-confidential-vms ; SUSE SLE Micro attestation (mature comparator) https://documentation.suse.com/sle-micro/5.5/html/SLE-Micro-all/cha-security-attestation.html

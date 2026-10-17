@@ -509,15 +509,17 @@ root. "Keep unencrypted" stays available as an explicit opt-out that runs the
 slow offline `reencrypt --decrypt`.
 
 Disadvantage of A (encrypted by default), weighed against G2's "simple to
-mount with standard commands": the shipped image is no longer trivially
-mountable. A plaintext image mounts with a plain `mount -o loop image.img
-/mnt`; a LUKS image forces EVERY user -- including one who does not want
-encryption -- to `cryptsetup luksOpen` (with the known default passphrase)
-and map the partitions (`losetup`/`kpartx`) before mounting. So inspection,
-recovery, and scripted provisioning all gain an extra cryptsetup step under A.
-B keeps the plaintext image trivially mountable, at the price of a plaintext
-shipped state. This is a real usability cost of A, not a security one, and is
-documented here as the tradeoff rather than resolved.
+mount with standard commands": the shipped image is a PARTITIONED disk image, so
+neither option mounts with a bare `mount -o loop image.img /mnt` -- both need the
+partitions mapped first (`losetup -P image.img`, or `kpartx -a`) and then the
+root partition mounted. The difference is one step: Option A additionally
+requires `cryptsetup luksOpen` of the mapped root partition (with the shipped
+default passphrase) before it can be mounted, for EVERY user including one who
+does not want encryption. So inspection, recovery, and scripted provisioning gain
+that extra cryptsetup step under A. B needs the same partition mapping but no
+cryptsetup, at the price of a plaintext shipped state. This is a real usability
+cost of A, not a security one, and is documented here as the tradeoff rather than
+resolved.
 
 Option B -- ship plaintext, opt into encryption at first boot via a slow
 offline `reencrypt --encrypt`. Matches "unencrypted is the shipped state"

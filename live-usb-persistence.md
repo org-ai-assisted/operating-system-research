@@ -117,7 +117,7 @@ isohybrid when persistence is wanted.
 
 | Project | Medium layout | Persistence unit | Encryption | Provisioned |
 |---|---|---|---|---|
-| Tails | partitioned GPT (files copied, not dd); FAT32 system partition + reserved free space | dedicated LUKS2 partition (`TailsData`, ext4 inside) | mandatory LUKS2 + Argon2id | at runtime, by a wizard inside the booted system |
+| Tails (USB image `.img`, the persistence-capable format) | raw-written to the whole device, but a PARTITIONED GPT image -- an ESP (FAT, label `TAILS`) plus reserved free space, so the live fs is on a partition and the whole device is not iso9660 | "Persistent Storage": a LUKS/dm-crypt partition carved in the free space | mandatory LUKS (dm-crypt) | at runtime, by a wizard inside the booted system |
 | Debian live-boot | user's choice: file on a writable fs, or a labeled partition | overlay FILE (`persistence` + `persistence.conf`) or partition | native `persistence-encryption=luks` | at prep time; discovered at boot by label/file |
 | Fedora `livecd-iso-to-disk` | installer partitions + copies files (ext4/vfat/...), not dd | overlay FILE `/LiveOS/overlay-*` (dm-snapshot) or `--overlayfs` dirs | only `/home` (the separate `/LiveOS/home.img`) is LUKS by default; the root persistence overlay (changes to `/`) is unencrypted | at install time |
 | Ubuntu casper | SDC/mkusb copy files to a FAT partition (+ a partition for the writable area) | `casper-rw`/`writable` FILE (<=4 GB) or labeled partition | none native (DIY LUKS) | at install time; discovered at boot by label |
@@ -132,16 +132,32 @@ partition and the whole disk is never mounted.
 
 ### Tails -- LUKS partition, runtime wizard
 
-The Tails installer/cloner writes a partitioned GPT device: a FAT32 system
-partition labeled `TAILS` (with the GPT hidden flag so Windows ignores it),
-files copied from the ISO (NOT a raw dd), and the rest of the device left
-unpartitioned. The Persistent Storage wizard, run from inside the booted
-system, carves a dedicated LUKS2/Argon2id partition (`TailsData`, ext4
-inside) into that reserved free space. Runtime partitioning succeeds
-precisely because the system is on a FAT32 partition, so the whole disk is
-never mounted.
+Tails ships TWO formats, and only one supports persistence -- so it matters
+which is meant:
+
+- The USB IMAGE (`tails-amd64-<ver>.img`) is written RAW to the whole USB
+  device (`dd`, GNOME Disks, balenaEtcher) -- but it is a PARTITIONED GPT
+  image: an EFI System Partition (FAT, label `TAILS`) plus the rest of the
+  device left as free space. Because the live system sits on a PARTITION, the
+  whole block device is NOT mounted as one iso9660 filesystem, so the O_EXCL
+  constraint above does not apply. The Persistent Storage wizard, run from
+  inside the booted system, carves a LUKS/dm-crypt partition into that free
+  space (called "Persistent Storage"; the older `TailsData` name predates the
+  current wizard). Runtime partitioning succeeds precisely because the system
+  is on a partition, not the whole disk.
+- The ISO IMAGE (`tails-amd64-<ver>.iso`) is the whole-disk isohybrid, for
+  burning a DVD or booting a VM. Tails explicitly directs USB users to the USB
+  image instead. A DVD is read-only and a VM booting the read-only ISO has no
+  writable medium, so Persistent Storage is not available from the ISO.
+
+The directly-written USB image replaced the old (pre-3.12, before January
+2019) two-step method -- boot an intermediary Tails, then run Tails Installer
+(later renamed Tails Cloner) to COPY files onto the final stick. "Files copied,
+not a raw dd" describes that legacy path, not today's USB image.
 
 - https://tails.net/doc/persistent_storage/
+- https://tails.net/install/download/ (USB image) ; https://tails.net/install/download-iso/ (ISO image: DVD/VM)
+- https://tails.net/news/test_usb_images (3.12 directly-written USB image)
 - https://tails.net/contribute/design/persistence/
 - https://tails.net/contribute/design/installation/
 
@@ -235,7 +251,8 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
    partition-offset math from `/sys/class/block/<part>/start`), and it is the
    exact medium dracut's own autooverlay refuses. Fallback only.
 
-3. Tails model -- partitioned GPT medium + runtime LUKS partition carve.
+3. Tails model (the USB image, not the ISO) -- partitioned GPT medium +
+   runtime LUKS partition carve.
    Idiomatic for amnesic-by-default with opt-in encrypted persistence. The
    whole disk is never mounted, so the carve works with no workaround. Matches
    a "whole root persists in trailing free space, same label for a second

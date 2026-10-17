@@ -135,13 +135,15 @@ structural:
   (`70dmsquash-live-autooverlay`) skips on `[ "$partition" != "1" ] || [
   "$readonly" != "0" ]` ("Skipping overlay creation: unpartitioned or read-only
   media detected") -- it keys on the sysfs PARTITION INDEX and the read-only
-  flag, NOT on any iso9660 detection. A raw-dd isohybrid is skipped because the
-  whole-disk medium is read-only (`ro = 1`), which is the relevant reason here.
-  Two edge cases follow from the literal test, not from iso9660 logic: a writable
-  live fs that is not partition 1 is also skipped, and a writable isohybrid
-  exposed as partition 1 would NOT be skipped. So the module reinforces the
-  read-only half of the constraint; it does not itself detect the whole-disk
-  iso9660 case.
+  flag, NOT on any iso9660 detection. A raw-dd isohybrid is skipped by the
+  PARTITION test: the live iso9660 label sits on the WHOLE disk, which has no
+  sysfs partition index, so `partition=0 != 1`. It is NOT the read-only flag that
+  fires -- `/sys/class/block/<dev>/ro` is the block-device flag and reads `0` on a
+  writable USB, independent of the iso9660 content (confirmed empirically). Two
+  edge cases follow from the literal test: a writable live fs that is not
+  partition 1 is ALSO skipped, and a writable isohybrid exposed as partition 1
+  would NOT be skipped. So the module catches the whole-disk iso9660 case via the
+  partition half (no partition index), not via read-only.
 
 A confirmed-working but non-idiomatic workaround exists (see "Loop-device
 indirection"), but every project that actually ships persistence avoids the
@@ -290,9 +292,11 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
 3. Tails model (the USB image, not the ISO) -- partitioned GPT medium +
    runtime LUKS partition carve.
    Idiomatic for amnesic-by-default with opt-in encrypted persistence. The
-   whole disk is never mounted, so the carve works with no workaround. Matches
-   a "whole root persists in trailing free space, same label for a second
-   disk" requirement.
+   whole disk is never mounted, so the carve works with no workaround. It
+   matches the trailing-free-space LAYOUT requirement (a LUKS partition carved
+   into reserved free space, same-label for a second disk) -- though Tails's own
+   Persistent Storage is SELECTIVE (a per-feature list), not whole-root
+   persistence; whole-root is Kicksecure's requirement, not Tails's behaviour.
 
 4. Fedora model -- overlay FILE on a writable medium. Idiomatic for a
    convenience persistence feature. No repartitioning. But the classic
@@ -486,8 +490,12 @@ per-user FDE, asymmetric because of how cryptsetup works:
 
 - Keyslot change (`luksAddKey`/`luksChangeKey`): online and instant -- works
   on the live mounted root.
-- Data reencryption (`cryptsetup reencrypt --encrypt`/`--decrypt`): offline
-  and slow -- cannot run on the mounted root; rewrites the data.
+- Data reencryption (`cryptsetup reencrypt --encrypt`/`--decrypt`): slow,
+  rewrites the data. LUKS2 supports ONLINE reencryption (cryptsetup 2.2.0+) for a
+  cipher/key change on a mounted device, but ADDING or REMOVING the dm-crypt layer
+  (`--encrypt`/`--decrypt`) still needs an offline window you cannot take on the
+  root you are booted from -- so run it from the initramfs/live environment, not
+  the running root.
 
 Per G2 the first boot PRESENTS the encrypt-or-not choice either way; A and B
 differ only in the shipped starting state and therefore in which direction is

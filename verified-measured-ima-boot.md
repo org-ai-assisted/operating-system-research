@@ -64,6 +64,8 @@ roots in your own keys in UEFI `db`, which the kernel loads directly into its
 MOK/`.machine`. See the Sovereign Boot section.)
 
 
+Sources: Debian SecureBoot https://wiki.debian.org/SecureBoot ; Debian trust-machine-keyring-by-default patch https://sources.debian.org/src/linux/6.12.107-1/debian/patches/features/all/db-mok-keyring/trust-machine-keyring-by-default.patch
+
 ## How the major projects solve it
 
 Convergence is strong, and it is the systemd model: a signed boot artifact
@@ -106,6 +108,8 @@ Three load-bearing observations:
   trustworthy root of trust.
 
 
+Sources: ParticleOS https://github.com/systemd/particleos ; mkosi https://github.com/systemd/mkosi ; composefs https://github.com/composefs/composefs ; ostree composefs https://ostreedev.github.io/ostree/composefs/ ; Fedora sealed Atomic https://fedoramagazine.org/sealed-atomic-desktops-test-images/ ; bootc https://bootc.dev/ ; openSUSE systemd-boot FDE https://microos.opensuse.org/blog/2023-12-20-sdboot-fde/ ; pcr-oracle retirement https://news.opensuse.org/2026/03/11/dropping-pcr-oracle/ ; Ubuntu Core FDE https://documentation.ubuntu.com/core/explanation/full-disk-encryption/ ; secboot https://github.com/canonical/secboot ; verity-squash-root https://github.com/brandsimon/verity-squash-root/ ; KDE Linux verity https://community.kde.org/KDE_Linux/Verity ; Android AVB https://source.android.com/docs/security/features/verifiedboot/dm-verity ; ChromeOS https://www.chromium.org/chromium-os/chromiumos-design-docs/verified-boot/ ; Flatcar https://hackmd.io/@flatcar/H1MDJuu7lg ; Azure Linux read-only roots https://mintlify.wiki/microsoft/azurelinux/security/read-only-roots ; Talos SecureBoot https://docs.siderolabs.com/talos/v1.13/platform-specific-installations/bare-metal-platforms/secureboot ; Kairos trusted boot https://kairos.io/docs/architecture/trustedboot/ ; Garden Linux boot modes https://github.com/gardenlinux/gardenlinux/blob/main/docs/explanation/boot-modes.md ; Vanilla OS ABRoot https://github.com/Vanilla-OS/ABRoot
+
 ## The idiomatic 2025/2026 stack
 
 1. A signed boot artifact (UKI) bundling kernel + initrd + cmdline, loaded
@@ -124,6 +128,8 @@ else). For a Debian base, dm-verity is the better fit: composefs tooling is
 Fedora/ostree-centric and still experimental, whereas dm-verity over
 squashfs/erofs is well-trodden in Debian live and in verity-squash-root.
 
+
+Sources: systemd trusted boot https://0pointer.net/blog/brave-new-trusted-boot-world.html ; https://0pointer.net/blog/fitting-everything-together.html ; UKI spec https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd-stub https://man7.org/linux/man-pages/man7/systemd-stub.7.html ; systemd-pcrlock https://man7.org/linux/man-pages/man8/systemd-pcrlock.8.html ; systemd-measure https://man7.org/linux/man-pages/man1/systemd-measure.1.html ; Discoverable Partitions Spec https://uapi-group.org/specifications/specs/discoverable_partitions_specification/ ; sbctl https://github.com/Foxboron/sbctl ; systemd rootfs discovery https://systemd.io/ROOTFS_DISCOVERY/
 
 ## The viable designs for Kicksecure
 
@@ -198,6 +204,8 @@ compatibility, works out of the box, detects tamper), with Sovereign Boot
 both; the roothash rides its signed cmdline; `ukify` keeps the kernel+initrd
 Debian's.
 
+Sources: GRUB digital signatures https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html ; GRUB measured boot https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124 https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; tpm-in-signed-core thread Bug#846383 https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2021-August/017634.html ; dm-verity (kernel) https://docs.kernel.org/admin-guide/device-mapper/verity.html
+
 ### Signing the initrd without a UKI
 
 A UKI is one carrier for the signed initrd, not the only one -- but the
@@ -258,6 +266,8 @@ is genuinely new ground: Kicksecure would have to provide the key-gen, the signe
 self-built core, the signing hooks, enrollment, and a mandatory GRUB password
 itself.
 
+
+Sources: standalone initrd not kernel-verified, 2013 RFC https://lkml.iu.edu/hypermail/linux/kernel/1302.0/02432.html ; GRUB GPG-style digital signatures https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html ; Fedora grub security modules https://fedoraproject.org/wiki/Changes/Include_security_modules_in_efi_Grub2 ; systemd-stub/UKI rationale https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; Debian re-sign hook points https://kernel-team.pages.debian.net/kernel-handbook/ch-update-hooks.html ; Gentoo Secure Boot/GRUB https://wiki.gentoo.org/wiki/Secure_Boot/GRUB ; Libreboot/Canoeboot GRUB hardening https://canoeboot.org/docs/gnulinux/grub_hardening.html ; Debian bug #906124 https://bugs.debian.org/906124
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 
@@ -413,6 +423,8 @@ upstream RFC `CONFIG_MODULE_SIG_PLATFORM` (2025, not merged) would let `db` sign
 modules and would make shim droppable -- worth tracking.)
 
 
+Sources: shim README https://github.com/rhboot/shim ; rodsbooks controlling Secure Boot https://www.rodsbooks.com/efi-bootloaders/controlling-sb.html ; kernel module signing https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; Ubuntu Secure Boot https://documentation.ubuntu.com/security/docs/security-features/platform-protections/secure-boot/ ; Kicksecure Sovereign Boot https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; MS 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/ ; Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys https://www.kicksecure.com/wiki/Verified_Boot#Keys ; Authenticode digest excludes cert table https://blog.trailofbits.com/2020/05/27/verifying-windows-binaries-without-windows/ ; Fedora multi-signed shim https://fedoraproject.org/wiki/Test_Day:2026-01-12_Multi-signed_shim ; openSUSE dual-signed shim + ASUS https://forums.opensuse.org/t/secure-boot-asking-for-certificate-permission/132905 ; systemd-sbsign appends https://manpages.opensuse.org/Tumbleweed/systemd-experimental/systemd-sbsign.1.en.html ; pesign https://man.archlinux.org/man/pesign.1 ; .machine keyring patch https://kernsec.org/pipermail/linux-security-module-archive/2022-January/030363.html ; DKMS MOK workflow https://www.kicksecure.com/wiki/Secure_Boot ; CONFIG_MODULE_SIG_PLATFORM RFC https://lkml.iu.edu/hypermail/linux/kernel/2506.0/01180.html ; Debian shim packaging VENDOR_CERT https://salsa.debian.org/efi-team/shim/-/raw/master/debian/rules ; shim verify.c https://raw.githubusercontent.com/rhboot/shim/main/verify.c ; shim cert.S https://raw.githubusercontent.com/rhboot/shim/main/cert.S ; EDK2 DxeImageVerificationLib https://github.com/tianocore/edk2/blob/master/SecurityPkg/Library/DxeImageVerificationLib/DxeImageVerificationLib.c ; Debian trust-machine-keyring-by-default patch https://sources.debian.org/src/linux/6.12.107-1/debian/patches/features/all/db-mok-keyring/trust-machine-keyring-by-default.patch
+
 ## Empirically settled (sandbox, Debian trixie)
 
 A real UEFI + Secure Boot + TPM 2.0 harness was built inside the sandbox qube
@@ -461,6 +473,8 @@ real guarantee is measured boot + TPM-sealing/attestation (detection), with
 Sovereign Boot for loader-level prevention.
 
 
+Sources: Debian grub signed-image modules https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot https://wiki.debian.org/SecureBoot
+
 ## Measured boot for remote attestation
 
 Remote attestation tolerates GRUB's "non-precomputable PCR 8/9" weakness, which
@@ -501,6 +515,8 @@ reference-state stability than PCR 8/9). Either way the attestation MODEL is
 sound; the roughness in the GRUB PCR 8/9 path is operational (brittle reference
 state), not theoretical.
 
+Sources: TPM2 PCR measurements https://systemd.io/TPM2_PCR_MEASUREMENTS/ ; Linux TPM PCR registry https://uapi-group.org/specifications/specs/linux_tpm_pcr_registry/ ; Keylime measured boot https://keylime.readthedocs.io/en/latest/user_guide/use_measured_boot.html ; Keylime https://keylime.dev
+
 ### Prior art on a Debian base (as of 2026-10): greenfield
 
 Remote attestation on a Debian base barely exists. Keylime -- the reference
@@ -516,6 +532,8 @@ SUSE SLE Micro, which ships Keylime (IMA + measured boot to a verifier) as a
 documented feature. So the attestation goal means packaging/integrating Keylime
 (or equivalent) ourselves -- there is no Debian-native path to inherit.
 
+
+Sources: Ubuntu confidential VMs on Azure https://ubuntu.com/blog/ephemeral-ubuntu-confidential-vms-azure ; Azure guest attestation https://learn.microsoft.com/azure/confidential-computing/guest-attestation-confidential-vms ; SUSE SLE Micro attestation https://documentation.suse.com/sle-micro/5.5/html/SLE-Micro-all/cha-security-attestation.html ; Keylime install (RHEL/SUSE only) https://keylime.readthedocs.io/en/latest/installation.html
 
 ## IMA / EVM
 
@@ -556,6 +574,8 @@ documented feature. So the attestation goal means packaging/integrating Keylime
   for provenance, and not to be advertised as vendor-verified. Nobody ships this
   on stock Debian.
 
+
+Sources: IMA concepts https://ima-doc.readthedocs.io/en/latest/ima-concepts.html ; IMA policy https://ima-doc.readthedocs.io/en/latest/ima-policy.html ; debhelper bug #766267 https://bugs.debian.org/766267 ; apt bug #823945 https://bugs.debian.org/823945 ; apt-devel patch thread https://lists.debian.org/deity/2016/05/msg00034.html ; DebSignatures spec https://wiki.debian.org/Teams/Dpkg/Spec/DebSignatures ; Fedora rpm-plugin-ima https://packages.fedoraproject.org/pkgs/rpm/rpm-plugin-ima/ ; ima-evm-utils https://packages.debian.org/sid/ima-evm-utils
 
 ## Installed system: verity root + working apt
 
@@ -600,6 +620,8 @@ Engineering guidance:
   cheap (only the sealed image duplicates, not a full ABRoot A/B root) and
   removes the brick risk without compromising the "apt still works" property.
 
+
+Sources: transactional-update https://github.com/openSUSE/transactional-update
 
 ## BIOS: a degraded fallback, by design
 
@@ -688,38 +710,3 @@ the key-ownership front-end for the MOK enrollment this design needs. Today's
 `grub-live` (dracut `90overlay-root` + `rootovl` + `live-hardener`) is
 statelessness, explicitly NOT an integrity boundary -- the gap this design
 closes.
-
-
-## Citations
-
-- systemd trusted boot: https://0pointer.net/blog/brave-new-trusted-boot-world.html ; https://0pointer.net/blog/fitting-everything-together.html
-- UKI spec: https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd-stub: https://man7.org/linux/man-pages/man7/systemd-stub.7.html
-- TPM2 PCR measurements: https://systemd.io/TPM2_PCR_MEASUREMENTS/ ; PCR registry: https://uapi-group.org/specifications/specs/linux_tpm_pcr_registry/
-- systemd-pcrlock: https://man7.org/linux/man-pages/man8/systemd-pcrlock.8.html ; systemd-measure: https://man7.org/linux/man-pages/man1/systemd-measure.1.html
-- ParticleOS: https://github.com/systemd/particleos ; mkosi: https://github.com/systemd/mkosi
-- Discoverable Partitions Spec: https://uapi-group.org/specifications/specs/discoverable_partitions_specification/
-- composefs: https://github.com/composefs/composefs ; ostree composefs: https://ostreedev.github.io/ostree/composefs/
-- Fedora sealed Atomic: https://fedoramagazine.org/sealed-atomic-desktops-test-images/ ; bootc: https://bootc.dev/
-- openSUSE systemd-boot FDE: https://microos.opensuse.org/blog/2023-12-20-sdboot-fde/ ; pcr-oracle retirement: https://news.opensuse.org/2026/03/11/dropping-pcr-oracle/
-- transactional-update: https://github.com/openSUSE/transactional-update
-- Ubuntu Core FDE: https://documentation.ubuntu.com/core/explanation/full-disk-encryption/ ; secboot: https://github.com/canonical/secboot
-- Arch dm-verity + UKI, verity-squash-root: https://github.com/brandsimon/verity-squash-root/ ; KDE Linux verity: https://community.kde.org/KDE_Linux/Verity
-- sbctl: https://github.com/Foxboron/sbctl ; systemd rootfs discovery: https://systemd.io/ROOTFS_DISCOVERY/
-- Android AVB: https://source.android.com/docs/security/features/verifiedboot/dm-verity ; ChromeOS: https://www.chromium.org/chromium-os/chromiumos-design-docs/verified-boot/
-- Flatcar secure boot: https://hackmd.io/@flatcar/H1MDJuu7lg ; Azure Linux read-only roots: https://mintlify.wiki/microsoft/azurelinux/security/read-only-roots
-- Talos SecureBoot: https://docs.siderolabs.com/talos/v1.13/platform-specific-installations/bare-metal-platforms/secureboot ; Kairos trusted boot: https://kairos.io/docs/architecture/trustedboot/ ; Garden Linux boot modes: https://github.com/gardenlinux/gardenlinux/blob/main/docs/explanation/boot-modes.md
-- Vanilla OS ABRoot: https://github.com/Vanilla-OS/ABRoot
-- GRUB digital signatures: https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html ; measured boot: https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124: https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; grub tpm-in-signed-core thread (Bug#846383): https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2021-August/017634.html
-- Debian grub signed-image modules: https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot: https://wiki.debian.org/SecureBoot
-- dm-verity (kernel): https://docs.kernel.org/admin-guide/device-mapper/verity.html
-- IMA concepts/policy: https://ima-doc.readthedocs.io/en/latest/ima-concepts.html ; https://ima-doc.readthedocs.io/en/latest/ima-policy.html ; Keylime: https://keylime.dev ; https://keylime.readthedocs.io/en/latest/user_guide/use_measured_boot.html
-- Debian IMA/EVM per-file-signing gap (acknowledged, unresolved): debhelper bug #766267 https://bugs.debian.org/766267 ; apt bug #823945 https://bugs.debian.org/823945 ; apt-devel patch thread https://lists.debian.org/deity/2016/05/msg00034.html ; Keylime install (RHEL/SUSE only) https://keylime.readthedocs.io/en/latest/installation.html
-- Debian-base remote attestation prior art: Ubuntu confidential VMs on Azure https://ubuntu.com/blog/ephemeral-ubuntu-confidential-vms-azure ; Azure guest attestation https://learn.microsoft.com/azure/confidential-computing/guest-attestation-confidential-vms ; SUSE SLE Micro attestation (mature comparator) https://documentation.suse.com/sle-micro/5.5/html/SLE-Micro-all/cha-security-attestation.html
-- dpkg per-file signing / DebSignatures (draft, stalled): https://wiki.debian.org/Teams/Dpkg/Spec/DebSignatures ; Fedora rpm-plugin-ima (the model Debian lacks): https://packages.fedoraproject.org/pkgs/rpm/rpm-plugin-ima/ ; ima-evm-utils (evmctl): https://packages.debian.org/sid/ima-evm-utils
-- MOK scope (shim validates bootloader+kernel+modules; .machine keyring for dm-verity): shim README https://github.com/rhboot/shim ; rodsbooks controlling Secure Boot https://www.rodsbooks.com/efi-bootloaders/controlling-sb.html ; kernel module signing https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; Ubuntu Secure Boot (MOK, module-signing-only KeyUsage OID) https://documentation.ubuntu.com/security/docs/security-features/platform-protections/secure-boot/
-- Sovereign Boot: Kicksecure wiki https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; Microsoft 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/
-- Shim is MS-CA-signed only; request for a Debian-CA-signed shim (keeps MOK without MS): Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys section https://www.kicksecure.com/wiki/Verified_Boot#Keys
-- Dual-signing shim (append owner sig, MS sig survives): Authenticode digest excludes the cert table https://blog.trailofbits.com/2020/05/27/verifying-windows-binaries-without-windows/ ; Fedora multi-signed shim (2011+2023) https://fedoraproject.org/wiki/Test_Day:2026-01-12_Multi-signed_shim ; openSUSE dual-signed shim + ASUS firmware caveat https://forums.opensuse.org/t/secure-boot-asking-for-certificate-permission/132905 ; systemd-sbsign appends (vs sbsign replaces) https://manpages.opensuse.org/Tumbleweed/systemd-experimental/systemd-sbsign.1.en.html ; pesign https://man.archlinux.org/man/pesign.1
-- Kernel key sources (.builtin distro key; .platform from UEFI db; .machine from MOK via shim) + dm-verity platform-keyring (sovereign/self-enrolled, no MOK): https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING
-- Standalone initrd is not kernel-verified (2013 RFC rejected): https://lkml.iu.edu/hypermail/linux/kernel/1302.0/02432.html ; GRUB verifies a detached-signed initrd via check_signatures/verify_detached: https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html (Debian's signed grubx64.efi embeds the pgp/verify module -- verified empirically by `strings` -- but ships no trusted key and does not force enforcement; Fedora's analogous build once lacked the modules entirely: https://fedoraproject.org/wiki/Changes/Include_security_modules_in_efi_Grub2 ) ; systemd-stub/UKI rationale + PCR 11: https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; Debian re-sign hook points (/etc/initramfs/post-update.d/): https://kernel-team.pages.debian.net/kernel-handbook/ch-update-hooks.html
-- Module sigs use .secondary (incl. .machine/MOK), NOT .platform/db -- `.machine` keyring patch (".machine ... trusted within the kernel", unlike .platform): https://kernsec.org/pipermail/linux-security-module-archive/2022-January/030363.html ; DKMS MOK workflow https://www.kicksecure.com/wiki/Secure_Boot ; RFC to trust db for modules (CONFIG_MODULE_SIG_PLATFORM, 2025, not merged): https://lkml.iu.edu/hypermail/linux/kernel/2506.0/01180.html

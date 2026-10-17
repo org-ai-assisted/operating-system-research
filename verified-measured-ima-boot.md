@@ -121,56 +121,65 @@ squashfs/erofs is well-trodden in Debian live and in verity-squash-root.
 
 ## The viable designs for Kicksecure
 
-The requirement is subtler than it first looks: verified boot needs boot
-CONFINED to the signed artifact, not merely that the signed artifact verifies
-when it is chosen. An empirical test (below) confirmed that `shim -> Debian's
-signed GRUB -> a signed UKI` chainload verifies and refuses a tampered UKI. That
-is necessary but NOT sufficient: **Debian's stock signed GRUB cannot confine
-boot to the UKI.** Its `grubx64.efi` has `linux`/`initrd` built in, ships no
-`pgp`/`verify` module, and reads an UNSIGNED `/EFI/debian/grub.cfg`; `shim_lock`
-validates only the kernel PE. So an attacker (or anyone at the `e` menu)
-rewrites grub.cfg to `linux` the Debian-signed kernel with an attacker-controlled
-initrd -- Secure Boot still on, the UKI never executed. The signed-roothash
-kernel feature does not save this: a hostile initrd simply never activates
-verity and pivots elsewhere. So "ride Debian's prebuilt GRUB and chainload a UKI"
-is NOT a verified-boot config. That leaves two real designs plus one non-answer:
+Verified boot needs the TAMPERED boot to be PREVENTED or at least DETECTED. The
+first instinct -- make the bootloader refuse anything but a signed UKI -- does
+NOT work on a Debian base, and it is worth stating plainly why:
 
-**Option 1 (idiomatic, recommended) -- shim -> Debian's signed systemd-boot ->
-your signed UKI.** systemd-boot has no bare-kernel/`initrd` command: it loads
-only PE binaries (UKIs), each shim-verified, so boot IS confined to signed UKIs.
-Debian trixie now ships a shim-signed systemd-boot (fact 1), so this needs no
-own-build and the original reason to prefer GRUB is moot. `ukify` bundles
-Debian's stock kernel+initrd; you sign the UKI with your MOK-enrolled key; the
-dm-verity roothash rides the UKI's signed cmdline; systemd-stub measures PCR 11
-(deterministic). GRUB stays only as the degraded BIOS loader. This is exactly how
-Talos, Kairos, Garden Linux and Fedora sealed images load their UKIs -- via
-systemd-boot, NOT GRUB.
+**No bootloader confines boot while Debian's (or Microsoft's) keys are trusted.**
+- Debian's stock GRUB has `linux`/`initrd` built in, ships no `pgp`/`verify`
+  module, and reads an UNSIGNED `grub.cfg`: rewrite grub.cfg (or use the `e`
+  menu) to `linux` the Debian-signed kernel with an evil initrd; `shim_lock`
+  checks only the kernel PE.
+- systemd-boot is no better. It also loads Boot Loader Specification **Type #1**
+  entries (`linux` + a SEPARATE initrd), and per systemd's own `UEFI_SECURITY.md`
+  "initrds are also not verified in BLS Type #1 configurations." Drop a
+  `loader/entries/evil.conf` and it boots the signed kernel + unsigned initrd.
+  (So "systemd-boot only loads UKIs" is false -- an earlier draft of this note
+  claimed it; it is withdrawn.)
+- And the SAME Debian key signs BOTH systemd-boot and `grubx64.efi`, so an
+  attacker who can write the ESP swaps the shim second-stage for whichever signed
+  loader gives the easiest unsigned-initrd path. shim accepts it, Secure Boot
+  stays on, the UKI never runs.
 
-**Option 2 (keeps GRUB on UEFI) -- shim -> your OWN signed GRUB (GPG) -> Debian
-kernel + initrd.** The ONLY way to keep GRUB as the UEFI loader AND close the
-gap: build+sign your own `grubx64.efi` with `pgp`+`verify`+`tpm` built in, your
-pubkey embedded (it must live in the shim-verified PE -- Debian's prebuilt GRUB
-cannot carry it), a GRUB password, and `check_signatures=enforce` over
-grub.cfg+kernel+initrd, so grub.cfg and the initrd are finally signature-checked.
-dm-verity roothash on the signed grub.cfg cmdline. Historically fragile (Debian
-bug #906124: a core with `linux` but not `pgp` is a bypass) and the console `set
-check_signatures=no` must be locked out. Measured boot via GRUB's `tpm` module
-into PCR 8/9 (noisy, non-precomputable). Matches Flatcar/Azure/ChromeOS
-(carrier-is-signed). Cost: you own a GRUB build + key.
+So while the firmware trusts a kernel (Debian/MS-signed) that accepts an unsigned
+external initrd, and the ESP/boot-config is unauthenticated, the evil-initrd boot
+cannot be PREVENTED by choosing a loader. `CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG`
+does not save it either: a hostile initrd simply never activates verity. A signed
+UKI makes the INTENDED boot signed and measurable; it does not stop an attacker
+choosing a different path. That leaves two real anchors, meant to be used
+together:
 
-**Non-answer -- shim -> Debian's signed GRUB -> signed systemd-boot/UKI.**
-Tempting, because it keeps Debian's prebuilt GRUB as the first stage. It does
-NOT close the gap: the same unsigned grub.cfg + built-in `linux`/`initrd` let an
-attacker skip systemd-boot and boot the signed kernel with an evil initrd.
-Keeping Debian's stock GRUB anywhere in front of the kernel reintroduces the hole
-unless grub.cfg is itself signed -- which is Option 2. Not a real third option.
+**Anchor 1 (the mainstream guarantee) -- measured boot + TPM-sealing /
+attestation.** The intended boot (`shim -> systemd-boot -> signed UKI`) measures
+the UKI into PCR 11; any tampered path (a Type #1 entry, a swapped GRUB, an evil
+initrd) measures DIFFERENT PCRs. Bind the LUKS/FDE key to the expected PCRs with
+`systemd-cryptenroll` + `systemd-pcrlock`: a tampered boot then CANNOT unseal the
+disk key, and remote attestation of those PCRs FAILS. This is what Ubuntu Core
+and the systemd model actually deliver -- tamper is DETECTED and secrets
+WITHHELD, not refused at the loader. Practically: ship signed UKIs (so PCR 11 is
+deterministic and vendor-signable), avoid shipping Type #1 entries, and
+understand the guarantee comes from the TPM, not the loader.
 
-`CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` is DEFENSE-IN-DEPTH in either option,
-never the anchor: a tampered initrd can simply not activate verity and pivot
-elsewhere, so the kernel-keyring check only prevents a forged-but-"verified"
-rootfs substitution, not "the system actually uses the signed root." The anchor
-is whatever CONFINES boot and signs the initrd+cmdline -- systemd-boot+UKI
-(Option 1) or own-GRUB+`check_signatures` (Option 2).
+**Anchor 2 (the only loader-level PREVENTION) -- Sovereign Boot / own key
+hierarchy.** Remove Debian/Microsoft trust (enroll only your own keys, push the
+MS certs into `dbx`) and sign ONLY your own UKIs -- never a kernel that takes a
+separate initrd, never a GRUB with an unsigned cfg. Now no trusted artifact
+accepts an unsigned initrd, so the evil-initrd path is genuinely cut. This is the
+Sovereign Boot direction (next section); it buys PREVENTION rather than mere
+DETECTION, at the cost of out-of-the-box compatibility.
+
+An own-signed GRUB with `check_signatures=enforce` over grub.cfg+kernel+initrd
+(own `core.img` with `pgp`+`verify` built in, pubkey embedded, GRUB password)
+closes the GRUB layer -- but while the Debian key is
+still trusted an attacker swaps in Debian's signed systemd-boot or GRUB, so it
+only PREVENTS once Debian trust is also removed, i.e. it collapses into Anchor 2.
+On its own it adds nothing over Anchor 1, and it still costs an own GRUB build.
+
+The practical shape for Kicksecure: Anchor 1 by default (keeps MS-shim
+compatibility, works out of the box, detects tamper), with Sovereign Boot
+(Anchor 2) as the opt-in step up to prevention. A signed UKI is the carrier in
+both; the roothash rides its signed cmdline; `ukify` keeps the kernel+initrd
+Debian's.
 
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
@@ -246,9 +255,10 @@ so the interactive MokManager UI path was not separately exercised (high
 confidence it behaves identically). Debian's signed-grub prefix is `/EFI/debian`.
 
 Net: signature enforcement on the UKI path, and GRUB's PCR 8/9 measurement, are
-validated on stock trixie. Path CONFINEMENT is the separate requirement the
-design section resolves -- it needs systemd-boot (Option 1) or an own-signed
-GRUB (Option 2), because stock Debian GRUB does not provide it.
+validated on stock trixie. The tests do NOT establish CONFINEMENT -- and per the
+design section no loader provides it while Debian/MS keys are trusted -- so the
+real guarantee is measured boot + TPM-sealing/attestation (detection), with
+Sovereign Boot for loader-level prevention.
 
 
 ## Measured boot for remote attestation
@@ -279,7 +289,7 @@ the IMA log; a measured-boot policy and a runtime IMA policy). GRUB on EFI
 extends PCR 8/9 through the firmware's `EFI_TCG2_PROTOCOL HashLogExtendEvent`,
 so a verifier sees firmware + Secure Boot + GRUB in one continuous log.
 
-Option 1 (systemd-boot + UKI) gives the cleaner PCR 11 as well (better
+The systemd-boot + UKI path gives the cleaner PCR 11 as well (better
 reference-state stability than PCR 8/9). Either way the attestation MODEL is
 sound; the roughness in the GRUB PCR 8/9 path is operational (brittle reference
 state), not theoretical.
@@ -410,24 +420,25 @@ only, no Secure Boot, no measured boot, not marketed as "verified boot."
 
 ## Recommended direction
 
-Adopt **Option 1** -- `shim -> Debian's signed systemd-boot -> your signed UKI`
-on UEFI, with GRUB kept only as the degraded BIOS loader. It confines boot to
-signed UKIs (systemd-boot has no bare-kernel command), rides Debian's now-signed
-systemd-boot (no own-build), leaves the kernel+initrd to Debian (`ukify` only
-bundles them), bundles+signs the initrd, puts the dm-verity roothash on the UKI's
-signed cmdline, and gives deterministic PCR 11 -- the better substrate for the
-remote-attestation goal. It is how the comparable projects (Talos, Kairos, Garden
-Linux, Fedora sealed) actually load UKIs.
+Default to **Anchor 1 (detection)** -- ship signed UKIs loaded by `shim ->
+Debian's signed systemd-boot` on UEFI (`ukify` bundles Debian's stock
+kernel+initrd; MOK-enrolled key; dm-verity roothash on the UKI's signed cmdline;
+PCR 11), and bind the FDE key to the expected PCRs with `systemd-cryptenroll` +
+`systemd-pcrlock` so a tampered boot cannot unseal it and fails attestation. The
+security comes from the TPM, not the loader -- no loader refuses the tampered
+path while Debian/MS keys are trusted. This keeps MS-shim compatibility and works
+out of the box, and is what the comparable projects (Ubuntu Core, Talos, Kairos,
+Garden Linux, Fedora sealed) actually deliver.
 
-Choose **Option 2** (own signed GRUB + `check_signatures`) only if keeping GRUB
-as the UEFI loader is a hard requirement -- it is the sole way to do that AND
-close the initrd gap, at the cost of owning a GRUB build + key and a noisier
-PCR 8/9 measured-boot story.
+Offer **Anchor 2 (prevention) -- Sovereign Boot** as the opt-in step up: own key
+hierarchy, MS certs into `dbx`, sign only your own UKIs, so no trusted artifact
+accepts an unsigned initrd. This is the strongest guarantee and aligns with
+Kicksecure's Sovereign Boot work; it costs out-of-the-box compatibility.
 
-Do NOT keep Debian's stock GRUB in front of the kernel on the verified path: its
-unsigned grub.cfg + built-in `linux`/`initrd` reintroduce the gap regardless of
-what it chainloads. (The earlier draft's "ride Debian's stock GRUB -> UKI" is
-withdrawn for exactly this reason.)
+Do NOT rely on loader choice (GRUB vs systemd-boot) for confinement -- neither
+provides it on a Debian base. An own-signed GRUB + `check_signatures` closes only
+the GRUB layer and collapses into Anchor 2 once Debian trust is removed; it is
+worth the own-build only if GRUB on the UEFI path is a hard requirement.
 
 Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM,
 or a local-hash dpkg hook, to a frozen-appliance scope until Debian gains
@@ -436,11 +447,11 @@ package-level file signing.
 
 ## Open product decisions
 
-- **Option 1 (systemd-boot + UKI) vs Option 2 (own signed GRUB).** systemd-boot
-  is recommended now that Debian signs it; choose Option 2 only if GRUB on the
-  UEFI path is mandatory. Note this is a change from an earlier draft that
-  recommended riding Debian's stock GRUB to chainload a UKI -- that does not
-  confine boot and was withdrawn.
+- **Anchor 1 (detection: measured boot + TPM-sealing, keep MS-shim compat) by
+  default vs how far to push Anchor 2 (prevention: Sovereign Boot, own keys,
+  loses MS compat).** Recommended: Anchor 1 default + Sovereign Boot opt-in. (Two
+  earlier drafts -- "stock GRUB -> UKI", then "systemd-boot confines boot" -- were
+  both withdrawn: no loader confines boot while Debian/MS keys are trusted.)
 - **Rollback: keep the single backup copy, or move to A/B verity slots?**
   (A/B recommended.)
 - **IMA appraisal: ever, or measurement-only indefinitely?** Gated on Debian's

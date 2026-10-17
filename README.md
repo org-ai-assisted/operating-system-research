@@ -19,7 +19,7 @@ citations) solve it, judges the options, and records the decision.
   keeping GRUB and BIOS. Surveys systemd/ParticleOS, Fedora bootc/composefs,
   openSUSE MicroOS, Ubuntu Core, Arch/verity-squash-root, Android/ChromeOS,
   Flatcar, Azure Linux, Talos, Garden Linux; settles two facts empirically in a
-  Secure Boot + TPM sandbox; shows stock Debian GRUB cannot confine boot to a
-  signed UKI, and recommends shim -> systemd-boot -> signed UKI (own-signed GRUB
-  only if GRUB on UEFI is mandatory), dm-verity roothash on the signed cmdline,
-  IMA measurement-only for attestation.
+  Secure Boot + TPM sandbox; shows no bootloader confines boot while Debian/MS
+  keys are trusted, so the guarantee is measured boot + TPM-sealing/attestation
+  (detection) with Sovereign Boot for prevention; signed UKIs via shim ->
+  systemd-boot, dm-verity roothash on the signed cmdline, IMA measurement-only.

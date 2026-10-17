@@ -256,6 +256,14 @@ so MOK and the kernel `.machine` keyring keep working and dm-verity can still
 anchor via MOK/`.machine` (the default path) rather than being forced onto
 `.platform`.
 
+Dual-signing operational cost: the appended signature lives in that specific
+shim binary, so a Debian `shim-signed` package update ships a FRESH binary
+WITHOUT it. A dpkg trigger / apt hook on `shim-signed` must re-append the owner
+signature on every shim update -- mechanical and no MS secret, the same
+re-sign-on-update pattern as the UKI hook and DKMS MOK signing. Miss it and the
+next MS-signed-only shim still boots on MS-key machines but no longer boots under
+Sovereign Boot until re-appended.
+
 Dual-signing caveats: a MINORITY of firmware does not iterate all cert-table
 signatures and rejects multi-signed images (documented on some ASUS boards) --
 there the second signature must be stripped, so test and document it. And

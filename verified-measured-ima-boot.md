@@ -239,16 +239,32 @@ RC/demo-stage (3mdeb spec v0.1.0), not a shipped default.
 **Kicksecure requirement: keep MOK functional.** Because MOK is a shim feature
 (MokManager, `MokListRT`, `SHIM_LOCK`), keeping it working means keeping shim in
 the chain -- so the "drop shim" cleanest-sovereign path is ruled out for
-Kicksecure. The compatible options are: (a) the default MS-signed shim + MOK --
-MOK works, but Microsoft stays a trust root; or (b) for own-key sovereignty WITH
-MOK, keep shim but make it verifiable under your keys -- either RE-SIGN
-`shimx64.efi` with your own `db` key (paying a re-sign-shim-on-every-update cost),
-or adopt a Debian-CA-signed shim (Debian bug #1102680) and enroll that CA in `db`.
-Either way shim stays, so MOK and the kernel `.machine` keyring keep working and
-dm-verity can still anchor via MOK/`.machine` (the default path) rather than
-being forced onto `.platform`. The tradeoff to accept, then, is the shim
-maintenance step -- not dropping shim; hash-pinning shim is the fragile option to
-avoid.
+Kicksecure. The compatible options are: (a) the default MS-signed shim + MOK -- MOK works,
+but Microsoft stays a trust root; or (b) for own-key sovereignty WITH MOK, keep
+shim but make it verifiable under your keys. Best is to DUAL-SIGN: append your
+own signature as an extra `WIN_CERTIFICATE` in the PE cert table of Debian's
+MS-signed shim. Authenticode's digest excludes the cert table, so the Microsoft
+signature SURVIVES and no MS/Debian secret is needed -- the SAME shim then boots
+on MS-key machines (MS signature) AND on sovereign machines with your key in `db`
+(your signature), keeping MOK functional in both. This is exactly what Microsoft
+(2011+2023 keys), Fedora and openSUSE already ship. Append with `systemd-sbsign`
+or `pesign` (which ADD a cert-table entry), NOT classic `sbsign` (it REPLACES the
+signature) nor `osslsigncode -nest` (the Windows nested-attribute form UEFI does
+not read). Lesser alternatives: RE-SIGN shim with only your key (loses MS-key
+compat), or a Debian-CA-signed shim (Debian bug #1102680). Either way shim stays,
+so MOK and the kernel `.machine` keyring keep working and dm-verity can still
+anchor via MOK/`.machine` (the default path) rather than being forced onto
+`.platform`.
+
+Dual-signing caveats: a MINORITY of firmware does not iterate all cert-table
+signatures and rejects multi-signed images (documented on some ASUS boards) --
+there the second signature must be stripped, so test and document it. And
+`dbx`-by-hash is fatal regardless: if that shim build is ever hash-revoked (the
+standard post-CVE lever), no signature helps -- which also sinks the "hash-pin
+the shim" idea, the fragile option to avoid. The Kicksecure wiki's old "an EFI
+binary cannot have two signatures" line is already marked outdated on the page;
+multi-signature is standards-blessed (UEFI authenticates an image if ANY
+cert-table signature chains to `db`, with nothing in `dbx`) and in production.
 
 Why MOK is the deciding factor (so shim is NOT optional): the case that forces it
 is user / out-of-tree KERNEL MODULE signing -- DKMS modules (VirtualBox, tcp-isn,
@@ -562,5 +578,6 @@ closes.
 - MOK scope (shim validates bootloader+kernel+modules; .machine keyring for dm-verity): shim README https://github.com/rhboot/shim ; rodsbooks controlling Secure Boot https://www.rodsbooks.com/efi-bootloaders/controlling-sb.html ; kernel module signing https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; Ubuntu Secure Boot (MOK, module-signing-only KeyUsage OID) https://documentation.ubuntu.com/security/docs/security-features/platform-protections/secure-boot/
 - Sovereign Boot: Kicksecure wiki https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; Microsoft 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/
 - Shim is MS-CA-signed only; request for a Debian-CA-signed shim (keeps MOK without MS): Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys section https://www.kicksecure.com/wiki/Verified_Boot#Keys
+- Dual-signing shim (append owner sig, MS sig survives): Authenticode digest excludes the cert table https://blog.trailofbits.com/2020/05/27/verifying-windows-binaries-without-windows/ ; Fedora multi-signed shim (2011+2023) https://fedoraproject.org/wiki/Test_Day:2026-01-12_Multi-signed_shim ; openSUSE dual-signed shim + ASUS firmware caveat https://forums.opensuse.org/t/secure-boot-asking-for-certificate-permission/132905 ; systemd-sbsign appends (vs sbsign replaces) https://manpages.opensuse.org/Tumbleweed/systemd-experimental/systemd-sbsign.1.en.html ; pesign https://man.archlinux.org/man/pesign.1
 - Kernel key sources (.builtin distro key; .platform from UEFI db; .machine from MOK via shim) + dm-verity platform-keyring (sovereign/self-enrolled, no MOK): https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING
 - Module sigs use .secondary (incl. .machine/MOK), NOT .platform/db -- `.machine` keyring patch (".machine ... trusted within the kernel", unlike .platform): https://kernsec.org/pipermail/linux-security-module-archive/2022-January/030363.html ; DKMS MOK workflow https://www.kicksecure.com/wiki/Secure_Boot ; RFC to trust db for modules (CONFIG_MODULE_SIG_PLATFORM, 2025, not merged): https://lkml.iu.edu/hypermail/linux/kernel/2506.0/01180.html

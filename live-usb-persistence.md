@@ -78,6 +78,25 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   AND persistence" again points at the verity-split-root model (a compressed
   read-only `/usr` shipped as-is plus writable LUKS state), not a raw
   ext4/btrfs `.img`.
+  - Two refinements keep this honest. First, the compression win is SQUASHFS
+    (or erofs), not the ISO: squashfs can sit on a PARTITION of a normal GPT
+    disk image with a writable partition beside it, so "stuck with squashfs"
+    does NOT mean "stuck with an ISO." What forces read-only is the raw-image
+    problem (a raw `.img` of a read-write fs is big-or-wrapped), not the
+    container. Second, "zero extra step" is TOOL-RELATIVE, so the strict "one
+    universal image, every tool including `dd`" rule is the only thing that
+    truly forces a compressed read-only fs:
+    - any tool incl. raw `dd`, one physical-USB image, persistent -> only a
+      compressed read-only fs (squashfs/erofs) is both small and consumed
+      as-is -> read-only -> live or verity-split (shippable as a GPT `.img`,
+      not necessarily an ISO);
+    - accept a mainstream flasher (balenaEtcher, Raspberry Pi Imager, GNOME
+      Disks) -> `.img.xz` of a read-write btrfs/f2fs-zstd root is small AND
+      zero-step AND persistent (what Raspberry Pi OS / Ubuntu / Fedora ship);
+    - VirtualBox test path (G5) -> a compressed VMDK/VDI (or an OVA;
+      streamOptimized VMDK is zlib-compressed) is small and boots directly, no
+      squashfs, no ISO;
+    - QEMU/KVM -> a compressed qcow2 boots directly.
 
 Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) and the
 zero-extra-step usability goal (G7) are mutually exclusive with the

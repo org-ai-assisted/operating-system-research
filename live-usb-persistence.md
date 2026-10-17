@@ -132,10 +132,16 @@ structural:
   system" (even `-F` is refused), and `cryptsetup luksFormat` refuses with no
   override. `wipefs --force` works, but formatting and LUKS do not.
 - dracut's own boot-time persistence-carving module
-  (`70dmsquash-live-autooverlay`) confirms the constraint: it EXPLICITLY skips
-  read-only and whole-disk-iso9660 media (`ro != 0` or unpartitioned ->
-  "Skipping overlay creation"). It only carves free space on a real,
-  writable, partitioned device.
+  (`70dmsquash-live-autooverlay`) skips on `[ "$partition" != "1" ] || [
+  "$readonly" != "0" ]` ("Skipping overlay creation: unpartitioned or read-only
+  media detected") -- it keys on the sysfs PARTITION INDEX and the read-only
+  flag, NOT on any iso9660 detection. A raw-dd isohybrid is skipped because the
+  whole-disk medium is read-only (`ro = 1`), which is the relevant reason here.
+  Two edge cases follow from the literal test, not from iso9660 logic: a writable
+  live fs that is not partition 1 is also skipped, and a writable isohybrid
+  exposed as partition 1 would NOT be skipped. So the module reinforces the
+  read-only half of the constraint; it does not itself detect the whole-disk
+  iso9660 case.
 
 A confirmed-working but non-idiomatic workaround exists (see "Loop-device
 indirection"), but every project that actually ships persistence avoids the
@@ -400,7 +406,7 @@ ones that decompress xz WHILE writing to the device (no manual `xz -d`):
   "dd that understands xz." IN Debian: `bmap-tools` (bookworm 3.6-2); in trixie
   `bmap-tools` is a transitional package and the binary moved to the renamed
   `bmaptool` 3.9.0-3 (command is `bmaptool` either way).
-  https://manpages.debian.org/trixie/bmap-tools/bmaptool.1.en.html
+  https://manpages.debian.org/trixie/bmaptool/bmaptool.1.en.html
 
 So within the Debian archive itself -- the relevant ecosystem for a
 Debian-based Kicksecure/Whonix -- the xz-decompressing writers are bmaptool
@@ -490,10 +496,30 @@ the fast path (keyslot change) versus the slow one (full reencryption).
 Option A (recommended) -- ship the root already inside LUKS2 with a
 known/default keyslot that the initramfs unlocks automatically; FORCE the user
 to set their own passphrase at first boot (a fast, online `luksAddKey` +
-`luksRemoveKey` of the default). Encrypted from the first byte, no plaintext
-window, fast first boot, user passphrase enrolled before any user data exists.
-"Keep unencrypted" stays available as an explicit opt-out that runs the slow
-offline `reencrypt --decrypt`.
+`luksRemoveKey` of the default). The data is LUKS-formatted from the first byte
+and first boot is fast -- but this is NOT confidentiality yet: the default key
+ships inside every image (on the unencrypted `/boot`/initramfs), so anyone with
+the image can open the volume and tamper with the root until `luksRemoveKey`
+runs, and a user who only ADDS a passphrase (no offline re-encrypt) then seals
+any pre-existing tampering under their own key. The honest guarantee of A is
+"encrypted at rest against a party WITHOUT the shipped key" plus a fast first
+boot; real confidentiality begins only once the default key is removed, and the
+pre-rekey tampering window closes only with a re-encrypt or an integrity-verified
+root. "Keep unencrypted" stays available as an explicit opt-out that runs the
+slow offline `reencrypt --decrypt`.
+
+Disadvantage of A (encrypted by default), weighed against G2's "simple to
+mount with standard commands": the shipped image is a PARTITIONED disk image, so
+neither option mounts with a bare `mount -o loop image.img /mnt` -- both need the
+partitions mapped first (`losetup -P image.img`, or `kpartx -a`) and then the
+root partition mounted. The difference is one step: Option A additionally
+requires `cryptsetup luksOpen` of the mapped root partition (with the shipped
+default passphrase) before it can be mounted, for EVERY user including one who
+does not want encryption. So inspection, recovery, and scripted provisioning gain
+that extra cryptsetup step under A. B needs the same partition mapping but no
+cryptsetup, at the price of a plaintext shipped state. This is a real usability
+cost of A, not a security one, and is documented here as the tradeoff rather than
+resolved.
 
 Option B -- ship plaintext, opt into encryption at first boot via a slow
 offline `reencrypt --encrypt`. Matches "unencrypted is the shipped state"

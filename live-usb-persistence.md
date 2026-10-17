@@ -11,6 +11,58 @@ root. The findings generalize, but the decision at the end is specific to
 that stack.
 
 
+## Goals (and where they conflict)
+
+Wanted properties, collected so the impossible combinations are explicit. They
+cannot all hold on one artifact; the conflicts are the point of listing them.
+
+- G1 -- Persistent whole root that behaves like a normal install (logs, state,
+  packages, home all survive reboot).
+- G2 -- Full-disk encryption of the whole root (not only `/home`); encryption
+  the default.
+- G3 -- Optional second disk as extra persistence via the same label.
+- G4 -- Amnesic ON DEMAND (`grub-live`), not amnesic by default.
+- G5 -- Easy to test in VirtualBox via the flow most users already know: attach
+  an ISO to the virtual DVD/optical device and boot it.
+- G6 -- Small download: high compression of the shipped artifact (squashfs/XZ
+  is the strongest option).
+
+### The conflicts
+
+- G5 vs G1/G2 -- IMPOSSIBLE as stated. A virtual DVD is a READ-ONLY optical
+  device and an ISO is read-only content: nothing booted from it can persist
+  back to it, and a writable LUKS/FDE root cannot live on it. So "boot the
+  persistent FDE image from the DVD/ISO device" cannot be done. The appliance
+  `.img` is a DISK image -- in VirtualBox it is attached as a virtual HARD DISK
+  (a one-time `VBoxManage convertfromraw image.img image.vdi`, or a raw-VMDK
+  descriptor, then boot), NOT placed on the DVD device. Slightly less familiar
+  than ISO-on-DVD, but a single documented command. The ISO-on-DVD flow stays
+  available only for the LIVE/try/installer ISO (amnesic, or Calamares-installs
+  to a separate virtual disk) -- which is not the persistent artifact.
+
+- G6 (squashfs) vs G1/G2 -- IMPOSSIBLE as a single root. squashfs is read-only
+  and immutable; it can be neither a writable persistent root nor a writable
+  LUKS FDE root. squashfs-as-root is the same live-vs-persistent contradiction
+  restated at the filesystem layer.
+  - Resolution already chosen (see Compression below): compress the DOWNLOAD
+    (`.img.xz` + `.bmap`, decompressed on the fly while flashing / before
+    `convertfromraw`), run on a read-WRITE btrfs/f2fs `compress=zstd` root --
+    compressed and persistent, larger than squashfs/XZ but far smaller than raw
+    ext4.
+  - The only way to KEEP squashfs AND persistence AND FDE is the verity-sealed
+    split-root model (see `verified-measured-ima-boot.md`): a read-only,
+    max-compressed squashfs/erofs `/usr` plus a writable LUKS `/var`+`/etc`+
+    `/home`. One such image can back BOTH an ISO (DVD-bootable; writes ->
+    tmpfs) and a disk image (writes -> persistent LUKS) -- the only way to get
+    G5 + G6 together with persistence, at the cost of no longer being a plain
+    "normal install."
+
+Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) are mutually
+exclusive with the plain-normal-persistent-FDE-install appliance in the Decision
+below, UNLESS the design moves to the verity-split-root model, which reconciles
+them but is not a plain install.
+
+
 ## The core constraint: whole-disk iso9660 blocks in-place partitioning
 
 The obvious idea -- flash the distributed isohybrid ISO with `dd`/Etcher,

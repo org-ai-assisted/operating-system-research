@@ -400,7 +400,7 @@ ones that decompress xz WHILE writing to the device (no manual `xz -d`):
   "dd that understands xz." IN Debian: `bmap-tools` (bookworm 3.6-2); in trixie
   `bmap-tools` is a transitional package and the binary moved to the renamed
   `bmaptool` 3.9.0-3 (command is `bmaptool` either way).
-  https://manpages.debian.org/trixie/bmap-tools/bmaptool.1.en.html
+  https://manpages.debian.org/trixie/bmaptool/bmaptool.1.en.html
 
 So within the Debian archive itself -- the relevant ecosystem for a
 Debian-based Kicksecure/Whonix -- the xz-decompressing writers are bmaptool
@@ -494,6 +494,17 @@ to set their own passphrase at first boot (a fast, online `luksAddKey` +
 window, fast first boot, user passphrase enrolled before any user data exists.
 "Keep unencrypted" stays available as an explicit opt-out that runs the slow
 offline `reencrypt --decrypt`.
+
+Disadvantage of A (encrypted by default), weighed against G2's "simple to
+mount with standard commands": the shipped image is no longer trivially
+mountable. A plaintext image mounts with a plain `mount -o loop image.img
+/mnt`; a LUKS image forces EVERY user -- including one who does not want
+encryption -- to `cryptsetup luksOpen` (with the known default passphrase)
+and map the partitions (`losetup`/`kpartx`) before mounting. So inspection,
+recovery, and scripted provisioning all gain an extra cryptsetup step under A.
+B keeps the plaintext image trivially mountable, at the price of a plaintext
+shipped state. This is a real usability cost of A, not a security one, and is
+documented here as the tradeoff rather than resolved.
 
 Option B -- ship plaintext, opt into encryption at first boot via a slow
 offline `reencrypt --encrypt`. Matches "unencrypted is the shipped state"

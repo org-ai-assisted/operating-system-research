@@ -343,14 +343,14 @@ closes.
 - Fedora sealed Atomic: https://fedoramagazine.org/sealed-atomic-desktops-test-images/ ; bootc: https://bootc.dev/
 - openSUSE systemd-boot FDE: https://microos.opensuse.org/blog/2023-12-20-sdboot-fde/ ; pcr-oracle retirement: https://news.opensuse.org/2026/03/11/dropping-pcr-oracle/
 - transactional-update: https://github.com/openSUSE/transactional-update
-- Ubuntu Core FDE: https://documentation.ubuntu.com/core/explanation/full-disk-encryption/ ; secboot: https://github.com/snapcore/secboot
+- Ubuntu Core FDE: https://documentation.ubuntu.com/core/explanation/full-disk-encryption/ ; secboot: https://github.com/canonical/secboot
 - Arch dm-verity + UKI, verity-squash-root: https://github.com/brandsimon/verity-squash-root/ ; KDE Linux verity: https://community.kde.org/KDE_Linux/Verity
 - sbctl: https://github.com/Foxboron/sbctl ; systemd rootfs discovery: https://systemd.io/ROOTFS_DISCOVERY/
 - Android AVB: https://source.android.com/docs/security/features/verifiedboot/dm-verity ; ChromeOS: https://www.chromium.org/chromium-os/chromiumos-design-docs/verified-boot/
 - Flatcar secure boot: https://hackmd.io/@flatcar/H1MDJuu7lg ; Azure Linux read-only roots: https://mintlify.wiki/microsoft/azurelinux/security/read-only-roots
 - Talos SecureBoot: https://docs.siderolabs.com/talos/v1.13/platform-specific-installations/bare-metal-platforms/secureboot ; Kairos trusted boot: https://kairos.io/docs/architecture/trustedboot/ ; Garden Linux boot modes: https://github.com/gardenlinux/gardenlinux/blob/main/docs/explanation/boot-modes.md
 - Vanilla OS ABRoot: https://github.com/Vanilla-OS/ABRoot
-- GRUB digital signatures: https://www.gnu.org/software/grub/manual/grub/html_node/Using-digital-signatures.html ; measured boot: https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124: https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; grub tpm-in-signed-core thread: https://lists.debian.org/pkg-grub-devel/2021/08/msg00039.html
+- GRUB digital signatures: https://www.gnu.org/software/grub/manual/html_node/Using-digital-signatures.html ; measured boot: https://www.gnu.org/software/grub/manual/html_node/Measured-Boot.html ; Debian grub bug #906124: https://alioth-lists.debian.net/pipermail/pkg-grub-devel/2019-July/016723.html ; grub tpm-in-signed-core thread: https://lists.debian.org/pkg-grub-devel/2021/08/msg00039.html
 - Debian grub signed-image modules: https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot: https://wiki.debian.org/SecureBoot
 - dm-verity (kernel): https://docs.kernel.org/admin-guide/device-mapper/verity.html
 - IMA concepts/policy: https://ima-doc.readthedocs.io/en/latest/ima-concepts.html ; https://ima-doc.readthedocs.io/en/latest/ima-policy.html ; Keylime: https://keylime.dev ; https://keylime.readthedocs.io/en/latest/user_guide/use_measured_boot.html

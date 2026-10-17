@@ -250,6 +250,24 @@ being forced onto `.platform`. The tradeoff to accept, then, is the shim
 maintenance step -- not dropping shim; hash-pinning shim is the fragile option to
 avoid.
 
+Why MOK is the deciding factor (so shim is NOT optional): the case that forces it
+is user / out-of-tree KERNEL MODULE signing -- DKMS modules (VirtualBox, tcp-isn,
+CPU-info-leak, ...) signed today via `/var/lib/dkms/mok.key`. On a stock Debian
+kernel under Secure Boot, an owner key enrolled in `db` reaches only the
+`.platform` keyring, which the kernel DELIBERATELY excludes from module-signature
+verification -- it checks `.builtin` and `.secondary`, into which only
+`.machine`/MOK is linked (`db` holds MS/vendor keys the kernel must not let sign
+modules). Note the asymmetry: `.platform`/`db` DOES anchor dm-verity roothash and
+kexec, but NOT modules. So without MOK an out-of-tree `.ko` cannot be trusted
+except by rebuilding the kernel with the key in `CONFIG_SYSTEM_TRUSTED_KEYS`,
+which abandons riding Debian's stock kernel. Hence the conditional "if sovereign
+boot can replace MOK, shim is optional" resolves NEGATIVE for Kicksecure: on a
+stock kernel it cannot, so shim stays. (Module-sig enforcement only bites under
+Secure Boot -- `CONFIG_MODULE_SIG_FORCE` is unset, lockdown enforces -- and the
+MOK path needs `CONFIG_INTEGRITY_MACHINE_KEYRING=y`, present in trixie. An
+upstream RFC `CONFIG_MODULE_SIG_PLATFORM` (2025, not merged) would let `db` sign
+modules and would make shim droppable -- worth tracking.)
+
 
 ## Empirically settled (sandbox, Debian trixie)
 
@@ -542,3 +560,4 @@ closes.
 - Sovereign Boot: Kicksecure wiki https://www.kicksecure.com/wiki/Sovereign_Boot ; Dasharo wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; 3mdeb verified-boot app spec https://github.com/3mdeb/verified-boot/blob/master/verified_boot_app_spec.md ; Microsoft 2011 CA expiry / UEFI CA 2023 https://eclypsium.com/blog/microsoft-secure-boot-certificates-expire-2026/
 - Shim is MS-CA-signed only; request for a Debian-CA-signed shim (keeps MOK without MS): Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys section https://www.kicksecure.com/wiki/Verified_Boot#Keys
 - Kernel key sources (.builtin distro key; .platform from UEFI db; .machine from MOK via shim) + dm-verity platform-keyring (sovereign/self-enrolled, no MOK): https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING
+- Module sigs use .secondary (incl. .machine/MOK), NOT .platform/db -- `.machine` keyring patch (".machine ... trusted within the kernel", unlike .platform): https://kernsec.org/pipermail/linux-security-module-archive/2022-January/030363.html ; DKMS MOK workflow https://www.kicksecure.com/wiki/Secure_Boot ; RFC to trust db for modules (CONFIG_MODULE_SIG_PLATFORM, 2025, not merged): https://lkml.iu.edu/hypermail/linux/kernel/2506.0/01180.html

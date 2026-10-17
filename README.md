@@ -14,3 +14,10 @@ citations) solve it, judges the options, and records the decision.
   Ubuntu casper/mkusb, Ventoy, and dracut `dmsquash-live`; records the shift
   from a live-overlay model to a pre-installed appliance-image model for
   Kicksecure/Whonix.
+- [verified-measured-ima-boot.md](verified-measured-ima-boot.md) -- verified
+  boot, measured boot, and IMA for a Debian base (live ISO and installed),
+  keeping GRUB and BIOS. Surveys systemd/ParticleOS, Fedora bootc/composefs,
+  openSUSE MicroOS, Ubuntu Core, Arch/verity-squash-root, Android/ChromeOS,
+  Flatcar, Azure Linux, Talos, Garden Linux; settles two facts empirically in a
+  Secure Boot + TPM sandbox; recommends GRUB chainloading a signed UKI (dm-verity
+  roothash on the signed cmdline) with IMA measurement-only for attestation.

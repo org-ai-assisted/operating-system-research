@@ -47,14 +47,16 @@ The practical invariant that follows: whatever the design, Kicksecure will
 (a) own an X.509 signing key; (b) enroll it via MOK. A normal `mokutil --import`
 (a leaf cert, no module-signing-only KeyUsage OID) makes shim trust that key to
 validate the bootloader, the UKI AND the kernel it loads -- the full boot chain,
-not just modules. To ALSO anchor a dm-verity roothash signature in-kernel, the
-owner must additionally run `mokutil --trust-mok`, which admits the key to the
-trusted `.machine` keyring (linked into `.secondary`); trixie's shipped kernel
-already has the compile-time gates (`CONFIG_INTEGRITY_MACHINE_KEYRING=y`,
+not just modules. That same MOK key also anchors a dm-verity roothash signature in-kernel: it is
+admitted to the trusted `.machine` keyring (linked into `.secondary`). On DEBIAN
+this is automatic -- Debian carries `trust-machine-keyring-by-default.patch`
+(`trust_moklist()` returns true unconditionally), so a plain `mokutil --import`
+leaf cert lands in `.machine` with NO `mokutil --trust-mok` needed (that extra
+step is an upstream/vanilla requirement, not Debian's). Trixie's shipped kernel
+has the compile-time gates (`CONFIG_INTEGRITY_MACHINE_KEYRING=y`,
 `CONFIG_INTEGRITY_CA_MACHINE_KEYRING` unset so a leaf cert is accepted,
 `CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG` + `..._SECONDARY_KEYRING=y`, read from
-`/boot/config`), so only the `--trust-mok` runtime step is needed -- no kernel
-rebuild. And (c) run a `postinst`/kernel/initramfs hook that re-signs on every
+`/boot/config`) -- no kernel rebuild. And (c) run a `postinst`/kernel/initramfs hook that re-signs on every
 update. (This MOK path is a SHIM feature and applies to the default, MS-shim
 design. Full Sovereign Boot drops shim, so there is no MOK at all -- trust then
 roots in your own keys in UEFI `db`, which the kernel loads directly into its
@@ -71,17 +73,17 @@ writable areas.
 
 | Project | Loader | Read-only-root integrity | Roothash carrier (trust anchor) | Measured boot | IMA |
 |---|---|---|---|---|---|
-| systemd / ParticleOS | systemd-boot | dm-verity (/usr via `mount.usr=verity`) | signed UKI cmdline | PCR 11 (systemd-stub), sealed via systemd-pcrlock | no |
+| systemd / ParticleOS | systemd-boot | dm-verity on /usr (`mount.usr=dissect` + image policy `usr=signed`) | signed UKI image policy (roothash auto-discovered from partition UUIDs) | PCR 11 (systemd-stub), signed PCR-11 policy (`SignExpectedPcr`), not pcrlock | no |
 | Fedora bootc / sealed Atomic | systemd-boot (UKI) or shim->GRUB (ostree) | composefs + fs-verity (file-level) | fs-verity digest in signed UKI cmdline | PCR 11 / PCR 7 | no |
-| openSUSE MicroOS / Aeon | systemd-boot | none (btrfs snapshots) | n/a -- integrity via TPM-sealed LUKS | PCR 0-7,11 via pcrlock / pcr-oracle | no |
-| Ubuntu Core | grub (gadget) | dm-verity for snaps (new, 2.73+) | signed model assertion + kernel.efi | PCR 7, secboot ResealKeys | no |
-| Arch / verity-squash-root | systemd-boot (UKI) | dm-verity over squashfs | signed UKI cmdline | PCR 11 | no |
+| openSUSE MicroOS / Aeon | systemd-boot | none (btrfs snapshots) | n/a -- integrity via TPM-sealed LUKS | PCR 0,2,4,7,9 (pcr-oracle; migrating to pcrlock, 2026-03) | no |
+| Ubuntu Core | grub (gadget) | dm-verity for essential snaps (snapd 2.73+) | signed model assertion + kernel.efi | PCR 7, secboot ResealKeys | no |
+| Arch / verity-squash-root | systemd-boot (UKI) | dm-verity over squashfs | signed UKI cmdline | - (SB + dm-verity; PCR 11 only implicit, not documented) | no |
 | Android AVB | OEM/SoC bootloader | dm-verity | signed, rollback-protected vbmeta | vendor | no |
 | ChromeOS | depthcharge | dm-verity | roothash on cmdline, signed in kernel-partition preamble | vendor | no |
 | Flatcar | shim -> GRUB | dm-verity (/usr) | roothash in GRUB-verified signed load scripts | optional | no |
-| Microsoft Azure Linux | GRUB | dm-verity | roothash on GRUB cmdline (Mariner `rd.verityroot.roothash=`), signed boot chain | - | no |
+| Microsoft Azure Linux | GRUB | dm-verity | roothash on GRUB cmdline (Mariner `rd.verityroot.roothash=`; Azure Linux 3.0 Image Customizer `verity.roothash=`), signed boot chain | - | no |
 | Talos | GRUB (BIOS) / systemd-boot+UKI (UEFI) | read-only squashfs in signed UKI | signed UKI | PCR 11 + 7 | no |
-| Garden Linux | systemd-boot (UEFI only) | EROFS rootfs in signed UKI (rejected dm-verity) | signed UKI | PCR 11 | no |
+| Garden Linux | systemd-boot (UEFI only) | EROFS rootfs in signed UKI (chose over dm-verity) | signed UKI | PCR 7 (UKI sections also measured into 11) | no |
 | Vanilla OS 2 / ABRoot | GRUB (two-stage) | A/B OCI image (consistency, not verity) | n/a | - | no |
 
 Three load-bearing observations:
@@ -160,10 +162,15 @@ together:
 attestation.** The intended boot (`shim -> systemd-boot -> signed UKI`) measures
 the UKI into PCR 11; any tampered path (a Type #1 entry, a swapped GRUB, an evil
 initrd) measures DIFFERENT PCRs. Bind the LUKS/FDE key to the expected PCRs with
-`systemd-cryptenroll` + `systemd-pcrlock`: a tampered boot then CANNOT unseal the
-disk key, and remote attestation of those PCRs FAILS. This is what Ubuntu Core
-and the systemd model actually deliver -- tamper is DETECTED and secrets
-WITHHELD, not refused at the loader. Practically: ship signed UKIs (so PCR 11 is
+`systemd-cryptenroll` + `systemd-pcrlock` (seal to PCR 7 +11, not the volatile
+8/9): a tampered boot then cannot obtain the TPM-SEALED key, and remote
+attestation of those PCRs FAILS. Caveat: `cryptenroll` ADDS a TPM keyslot and
+leaves the existing passphrase keyslot, so an evil initrd that simply prompts for
+the passphrase still unlocks the disk unless you `--wipe-slot=password` (TPM-only
+unlock, with an offline recovery key kept). So this is DETECTION (a failed
+auto-unlock / unexpected prompt is the signal) plus protection of the auto-unlock
+secret -- it WITHHOLDS the sealed key, it does not by itself refuse the boot or
+stop passphrase capture. This is what Ubuntu Core and the systemd model deliver. Practically: ship signed UKIs (so PCR 11 is
 deterministic and vendor-signable), avoid shipping Type #1 entries, and
 understand the guarantee comes from the TPM, not the loader.
 
@@ -222,13 +229,34 @@ about escaping key management:
 
 For DETECTION/attestation no signing is needed at all: GRUB's `tpm` module
 already measures the initrd into PCR 9 (and commands + cmdline into PCR 8), so a
-tampered initrd fails attestation after the fact. For Kicksecure -- keep GRUB,
-keep shim/MOK, ride Debian's stock kernel, NOT systemd-boot -- the coherent
-PREVENTION path is own-GRUB + `check_signatures` over grub.cfg+kernel+initrd (a
-bare signed initrd, no UKI), since GRUB is kept anyway; a UKI's lower-infra edge
-applies only to a systemd-boot setup, which Kicksecure is not using. If
-prevention is not required, DETECTION (measured boot into PCR 8/9 + TPM-sealing,
-zero new keys) is simplest and keeps the stock GRUB.
+tampered initrd is caught by attestation after the fact. PREVENTION is harder
+than "own-GRUB" alone suggests: own-GRUB + `check_signatures` closes the GRUB
+LAYER, but while Debian's shim (which embeds the Debian CA -- see the
+key-ownership section) still launches stock Debian-signed GRUB, an attacker
+simply swaps your own-GRUB for Debian's and regains the unsigned-grub.cfg +
+evil-initrd path. So loader-level prevention additionally requires an OWN shim
+(owner `VENDOR_CERT`) or revoking Debian's CA -- it is NOT achieved by signing
+the initrd/GRUB while keeping Debian's shim. For Kicksecure's
+keep-GRUB/keep-shim/MOK stack the realistic posture is DETECTION: measured boot
+for attestation (PCR 8/9/10/11) plus TPM-sealed FDE. Seal to PCR 7 (+11 for a
+UKI) via a signed `pcrlock` prediction, NOT to the non-precomputable PCR 8/9
+(which would refuse to unseal on the next kernel/initrd/grub.cfg update), and
+always keep an enrolled offline recovery key. ("Zero new SIGNING keys" is true;
+sealing still adds a TPM-bound keyslot, and leaving a passphrase keyslot means an
+evil initrd can still capture the passphrase -- so this is detection, not
+prevention; see Anchor 1.)
+
+Practicality note: GRUB `check_signatures` is essentially UNDOCUMENTED for Debian
+users. The only real how-to is the upstream GNU GRUB manual; Debian ships the
+tooling with no procedural docs, and real write-ups are rare and skew to Gentoo
+(own UEFI `db` key) or Libreboot/Canoeboot (own firmware), not stock Debian.
+Combining it with Debian's Secure Boot chain is effectively undocumented and
+structurally awkward (you must build+sign+enroll your own GRUB core), and Debian
+bug #906124 shows that path regressed AND raised a Secure-Boot-bypass hazard
+(nothing guarantees `pgp` is loaded whenever `linux` is). So the own-GRUB route
+is genuinely new ground: Kicksecure would have to provide the key-gen, the signed
+self-built core, the signing hooks, enrollment, and a mandatory GRUB password
+itself.
 
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
@@ -281,43 +309,70 @@ enrollment confirmed in firmware (TOFU + fingerprint display + multi-key
 rotation) -- the Sovereign-Boot end of this. Status: Sovereign Boot is
 RC/demo-stage (3mdeb spec v0.1.0), not a shipped default.
 
-**Kicksecure requirement: keep MOK functional.** Because MOK is a shim feature
-(MokManager, `MokListRT`, `SHIM_LOCK`), keeping it working means keeping shim in
-the chain -- so the "drop shim" cleanest-sovereign path is ruled out for
-Kicksecure. The compatible options are: (a) the default MS-signed shim + MOK -- MOK works,
-but Microsoft stays a trust root; or (b) for own-key sovereignty WITH MOK, keep
-shim but make it verifiable under your keys. Best is to DUAL-SIGN: append your
-own signature as an extra `WIN_CERTIFICATE` in the PE cert table of Debian's
-MS-signed shim. Authenticode's digest excludes the cert table, so the Microsoft
-signature SURVIVES and no MS/Debian secret is needed -- the SAME shim then boots
-on MS-key machines (MS signature) AND on sovereign machines with your key in `db`
-(your signature), keeping MOK functional in both. This is exactly what Microsoft
-(2011+2023 keys), Fedora and openSUSE already ship. Append with `systemd-sbsign`
-or `pesign` (which ADD a cert-table entry), NOT classic `sbsign` (it REPLACES the
-signature) nor `osslsigncode -nest` (the Windows nested-attribute form UEFI does
-not read). Lesser alternatives: RE-SIGN shim with only your key (loses MS-key
-compat), or a Debian-CA-signed shim (Debian bug #1102680). Either way shim stays,
-so MOK and the kernel `.machine` keyring keep working and dm-verity can still
-anchor via MOK/`.machine` (the default path) rather than being forced onto
-`.platform`.
+**Kicksecure requirement: keep MOK functional -- and what it costs.** MOK is a
+shim feature (MokManager, `MokListRT`, `SHIM_LOCK`), so keeping it means keeping
+shim -- the "drop shim" full-sovereign path is ruled out. The catch, source-proven:
+Debian's shim has the **Debian Secure Boot CA compiled in as its `VENDOR_CERT`**
+(`debian/rules` sets `VENDOR_CERT_FILE=debian/debian-uefi-ca.der`; shim's `cert.S`
+`.incbin`s it into the `.vendor_cert` PE section; `verify.c check_allowlist()`
+runs `AuthenticodeVerify(..., vendor_cert, ...)` as a standalone accept path), and
+shim verifies the next stage against that embedded CA INDEPENDENT of `db`/MOK. So
+ANY shim derived from Debian's -- re-signed, dual-signed, or a Debian-CA-signed
+shim (#1102680) -- still trusts stock Debian-signed GRUB, and an attacker drops
+the publicly-available Debian-signed GRUB + an unsigned `grub.cfg` + an evil
+initrd and boots it. **Keeping Debian's shim therefore gives DETECTION (and
+removes the MS dependency for who launches shim), but NOT loader-level
+PREVENTION.** The options:
 
-Dual-signing operational cost: the appended signature lives in that specific
-shim binary, so a Debian `shim-signed` package update ships a FRESH binary
-WITHOUT it. A dpkg trigger / apt hook on `shim-signed` must re-append the owner
-signature on every shim update -- mechanical and no MS secret, the same
-re-sign-on-update pattern as the UKI hook and DKMS MOK signing. Miss it and the
-next MS-signed-only shim still boots on MS-key machines but no longer boots under
-Sovereign Boot until re-appended.
+- **(a) Default -- Debian's MS-signed shim + additive MOK.** MOK works; the owner
+  signs their own UKIs/modules. Detection-level; Microsoft AND Debian both remain
+  trust roots.
+- **(b) Dual-signed Debian shim** -- append the owner's signature as an extra
+  `WIN_CERTIFICATE` to Debian's shim. Authenticode's digest excludes the cert
+  table, so the MS signature survives and no MS/Debian secret is needed; append
+  with `systemd-sbsign`/`pesign` (which ADD a cert-table entry), NOT classic
+  `sbsign` (replaces) nor `osslsigncode -nest` (the Windows nested form UEFI does
+  not read). This lets the SAME shim boot on MS-key machines AND on machines where
+  the owner key is ADDED to `db` -- a compatibility convenience. But it gives
+  neither sovereignty nor prevention: it still carries the Debian CA (same
+  evil-initrd hole as (a)), and it does NOT boot on a FULL-sovereign machine that
+  pushed the MS CA into `dbx`, because EDK2 rejects the whole image when ANY
+  signature chains to a `dbx` cert (`DxeImageVerificationLib` `IsForbiddenByDbx`
+  -> `EFI_ACCESS_DENIED`). Microsoft (2011+2023), Fedora and openSUSE ship
+  multi-signed shims, but those are MS+MS or MS+distro signatures, not
+  MS+sovereign-owner; the owner-plus-MS case is an extrapolation and breaks
+  exactly at the MS-in-`dbx` end.
+- **(c) Own shim -- the only prevention-WITH-MOK path.** Build a shim carrying the
+  OWNER's own `VENDOR_CERT` (so it launches ONLY owner-signed GRUB/UKI), made
+  bootable under Secure Boot either via shim-review (Microsoft-signed) or
+  self-signed + enrolled through `db`/MOK. This is the sole way to keep MOK AND
+  cut the evil-initrd path; earlier drafts never listed it. Larger undertaking
+  (own shim build + SB enablement) -- genuinely new ground for Kicksecure.
+- **(d) Full Sovereign Boot** -- drop shim, own `db` keys, MS (and, for real
+  prevention, Debian's CA too) in `dbx`, sign only own UKIs. Prevention, but MOK
+  is gone, so out-of-tree module signing would then need the kernel-rebuild route
+  -- off the table per "keep MOK".
+
+Honest bottom line: keep-MOK (keep shim) and loader-PREVENTION reconcile only by
+owning the shim (c); (a)/(b) are detection-level. Near-term for Kicksecure that
+means DETECTION -- measured boot + TPM-sealed FDE (with a recovery key) +
+attestation -- optionally with (b) for compatibility; true prevention is the
+own-shim (c) project.
+
+Dual-signing operational cost (if (b) is used): the appended signature lives in
+that specific shim binary, so a Debian `shim-signed` update ships a FRESH binary
+without it -- a dpkg trigger / apt hook must re-append the owner signature on
+every update (mechanical, no MS secret, same pattern as DKMS MOK signing).
 
 Dual-signing caveats: a MINORITY of firmware does not iterate all cert-table
 signatures and rejects multi-signed images (documented on some ASUS boards) --
-there the second signature must be stripped, so test and document it. And
-`dbx`-by-hash is fatal regardless: if that shim build is ever hash-revoked (the
-standard post-CVE lever), no signature helps -- which also sinks the "hash-pin
-the shim" idea, the fragile option to avoid. The Kicksecure wiki's old "an EFI
-binary cannot have two signatures" line is already marked outdated on the page;
-multi-signature is standards-blessed (UEFI authenticates an image if ANY
-cert-table signature chains to `db`, with nothing in `dbx`) and in production.
+there the second signature must be stripped. And `dbx`-by-hash is fatal
+regardless: if that shim build is ever hash-revoked (the standard post-CVE
+lever), no signature helps -- which also sinks the "hash-pin the shim" idea. The
+Kicksecure wiki's old "an EFI binary cannot have two signatures" line is already
+marked outdated; multi-signature is standards-blessed (UEFI authenticates an
+image if ANY cert-table signature chains to `db` AND nothing is in `dbx`) and in
+production.
 
 Can you dodge the `dbx`-by-hash problem by just not applying revocations? Mostly
 NO, and the part that is yes you get for free. The real control is NOT a package
@@ -423,14 +478,21 @@ fact, so unpredictable-but-logged PCRs are fine:
 3. The logs explain the opaque PCRs: the UEFI TCG2 event log (PCRs 0-7), GRUB's
    PCR 8/9, the IMA log (PCR 10).
 4. The verifier checks the quote signature (against the enrolled AK) and nonce,
-   then REPLAYS the logs: for each event it recomputes the digest FROM the event
-   body, folds `PCR = H(PCR || digest)` in order (skipping non-extended
-   `EV_NO_ACTION` records such as the Spec ID event), and checks the result
-   equals the quoted PCRs. Recomputing from the body is what catches a tampered
-   event; only then is the log content trusted.
+   then REPLAYS the logs: it folds each event's RECORDED digest into
+   `PCR = H(PCR || digest)` in order (skipping non-extended `EV_NO_ACTION`
+   records such as the Spec ID event) and checks the result equals the quoted
+   PCRs -- proving the log is the unmodified one that produced the quote. It then
+   validates the event CONTENT against a reference policy; content can be
+   recomputed-and-matched to the digest only for event types whose digest IS a
+   hash of that content (GRUB's PCR 8/9 string/file measurements, UEFI variable
+   events), NOT for PE image-load events (`EV_EFI_BOOT_SERVICES_APPLICATION`)
+   whose digest is the Authenticode hash of the binary, not of the event body.
+   (A naive "recompute every digest from the event body" would reject a genuine
+   boot on those events.)
 
-Keylime implements exactly this (quote over PCRs + `binary_bios_measurements` +
-the IMA log; a measured-boot policy and a runtime IMA policy). GRUB on EFI
+Keylime works this way (quote over PCRs + `binary_bios_measurements` + the IMA
+log; it replays by folding the recorded digests, then applies a measured-boot
+policy and a runtime IMA policy to the log content). GRUB on EFI
 extends PCR 8/9 through the firmware's `EFI_TCG2_PROTOCOL HashLogExtendEvent`,
 so a verifier sees firmware + Secure Boot + GRUB in one continuous log.
 
@@ -506,10 +568,10 @@ Three patterns:
 - (a) **A/B image swap** (Vanilla OS/ABRoot, Ubuntu Core, bootc): never `apt
   install` into the live root; build/pull a new signed image and reboot.
   Strongest atomicity, weakest "it is still apt" feel.
-- (b) **Immutable /usr + writable /etc,/var overlay** (systemd
-  `mount.usr=verity`, sysext/confext): the vendor tree is sealed, machine state
-  is writable. Clean integrity story, but no on-device package manager (sysext
-  is not apt: additive, no dependency resolution).
+- (b) **Immutable /usr + writable /etc,/var overlay** (systemd verity /usr via
+  `usrhash=` / `mount.usr=dissect`, sysext/confext): the vendor tree is sealed,
+  machine state is writable. Clean integrity story, but no on-device package
+  manager (sysext is not apt: additive, no dependency resolution).
 - (c) **Reboot-gated mutable escape hatch, then re-seal** (openSUSE MicroOS
   `transactional-update`; Kicksecure's own documented sysmaint design): keep the
   REAL package manager, mutate in a dedicated maintenance boot, regenerate +
@@ -565,28 +627,33 @@ only, no Secure Boot, no measured boot, not marketed as "verified boot."
 
 ## Recommended direction
 
-Default to **Anchor 1 (detection)** -- ship signed UKIs loaded by `shim ->
-Debian's signed systemd-boot` on UEFI (`ukify` bundles Debian's stock
-kernel+initrd; MOK-enrolled key; dm-verity roothash on the UKI's signed cmdline;
-PCR 11), and bind the FDE key to the expected PCRs with `systemd-cryptenroll` +
-`systemd-pcrlock` so a tampered boot cannot unseal it and fails attestation. The
-security comes from the TPM, not the loader -- no loader refuses the tampered
-path while Debian/MS keys are trusted. This keeps MS-shim compatibility and works
-out of the box, and is what the comparable projects (Ubuntu Core, Talos, Kairos,
-Garden Linux, Fedora sealed) actually deliver.
+Default to **Anchor 1 (detection)** -- ship signed UKIs (via GRUB chainloading
+the UKI, or `shim -> systemd-boot` where systemd-boot is used); `ukify` bundles
+Debian's stock kernel+initrd, MOK-enrolled key, dm-verity roothash on the UKI's
+signed cmdline, PCR 11. Bind the FDE key to the expected PCRs (PCR 7 +11, not the
+volatile 8/9) with `systemd-cryptenroll` + `systemd-pcrlock` so a tampered boot
+cannot obtain the sealed key and fails attestation -- keeping an offline recovery
+key (and noting a surviving passphrase keyslot is still capturable, so this is
+detection). The security comes from the TPM, not the loader -- no loader refuses
+the tampered path while Debian/MS keys are trusted. This keeps MS-shim
+compatibility and works out of the box, as Ubuntu Core / Talos / Fedora sealed
+deliver.
 
-Offer **Anchor 2 (prevention) -- Sovereign Boot** as the opt-in step up: own key
-hierarchy, MS certs into `dbx`, sign only your own UKIs, so no trusted artifact
-accepts an unsigned initrd. This is the strongest guarantee and aligns with
-Kicksecure's Sovereign Boot work; it costs out-of-the-box compatibility. Because
-Kicksecure wants MOK to stay functional, this variant KEEPS shim (re-signed under
-the own key, or a Debian-CA-signed shim per bug #1102680) rather than dropping
-it -- dropping shim would remove MOK. See the key-ownership section.
+Loader-level PREVENTION is a bigger step and does NOT come from keeping Debian's
+shim: because Debian's shim embeds the Debian CA, re-signing or dual-signing it
+still trusts Debian-signed GRUB (the evil-initrd path stays open). Prevention
+requires either (c) an OWN shim carrying the owner's own `VENDOR_CERT` -- keeps
+MOK and cuts the path, the real but larger project -- or (d) full Sovereign Boot
+(own `db` keys, MS AND Debian CAs revoked, own UKIs) which prevents but drops
+shim and therefore MOK (forcing the kernel-rebuild route for out-of-tree modules,
+off the table per keep-MOK). Near-term: Anchor 1 detection, with own-shim (c) as
+the prevention project. See the key-ownership section.
 
 Do NOT rely on loader choice (GRUB vs systemd-boot) for confinement -- neither
-provides it on a Debian base. An own-signed GRUB + `check_signatures` closes only
-the GRUB layer and collapses into Anchor 2 once Debian trust is removed; it is
-worth the own-build only if GRUB on the UEFI path is a hard requirement.
+provides it while Debian/MS keys are trusted. An own-signed GRUB +
+`check_signatures` closes only the GRUB layer; it is still bypassed by swapping
+in Debian's signed GRUB (which Debian's shim trusts via its embedded CA), so it
+prevents only combined with an own shim or with Debian's CA in `dbx`.
 
 Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM,
 or a local-hash dpkg hook, to a frozen-appliance scope until Debian gains
@@ -595,11 +662,15 @@ package-level file signing.
 
 ## Open product decisions
 
-- **Anchor 1 (detection: measured boot + TPM-sealing, keep MS-shim compat) by
-  default vs how far to push Anchor 2 (prevention: Sovereign Boot, own keys,
-  loses MS compat).** Recommended: Anchor 1 default + Sovereign Boot opt-in. (Two
-  earlier drafts -- "stock GRUB -> UKI", then "systemd-boot confines boot" -- were
-  both withdrawn: no loader confines boot while Debian/MS keys are trusted.)
+- **Detection by default vs how far to push prevention.** Anchor 1 (measured
+  boot + TPM-sealing, keeps MS-shim compat) is the near-term default. Prevention
+  needs owning the shim: an OWN shim with the owner's `VENDOR_CERT` keeps MOK and
+  cuts the evil-initrd path; full Sovereign Boot (own `db`, MS AND Debian CAs in
+  `dbx`, drop shim) also prevents but loses MOK. Recommended: Anchor 1 default,
+  own-shim as the prevention project. (Three earlier drafts -- "stock GRUB -> UKI",
+  "systemd-boot confines boot", and "re-signed/dual-signed Debian shim gives
+  prevention" -- were all withdrawn: no loader confines boot, and no
+  Debian-derived shim prevents, while Debian/MS keys are trusted.)
 - **Rollback: keep the single backup copy, or move to A/B verity slots?**
   (A/B recommended.)
 - **IMA appraisal: ever, or measurement-only indefinitely?** Gated on Debian's

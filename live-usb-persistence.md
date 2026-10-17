@@ -118,7 +118,7 @@ isohybrid when persistence is wanted.
 |---|---|---|---|---|
 | Tails | partitioned GPT (files copied, not dd); FAT32 system partition + reserved free space | dedicated LUKS2 partition (`TailsData`, ext4 inside) | mandatory LUKS2 + Argon2id | at runtime, by a wizard inside the booted system |
 | Debian live-boot | user's choice: file on a writable fs, or a labeled partition | overlay FILE (`persistence` + `persistence.conf`) or partition | native `persistence-encryption=luks` | at prep time; discovered at boot by label/file |
-| Fedora `livecd-iso-to-disk` | installer partitions + copies files (ext4/vfat/...), not dd | overlay FILE `/LiveOS/overlay-*` (dm-snapshot) or `--overlayfs` dirs | `/LiveOS/home.img` LUKS by default; root overlay unencrypted | at install time |
+| Fedora `livecd-iso-to-disk` | installer partitions + copies files (ext4/vfat/...), not dd | overlay FILE `/LiveOS/overlay-*` (dm-snapshot) or `--overlayfs` dirs | only `/home` (the separate `/LiveOS/home.img`) is LUKS by default; the root persistence overlay (changes to `/`) is unencrypted | at install time |
 | Ubuntu casper | SDC/mkusb copy files to a FAT partition (+ a partition for the writable area) | `casper-rw`/`writable` FILE (<=4 GB) or labeled partition | none native (DIY LUKS) | at install time; discovered at boot by label |
 | dracut `dmsquash-live` | whole-disk iso9660 for a raw-dd ISO; a partition/file on writable media otherwise | overlay FILE (`rd.overlay=LABEL=x:/path`, `:auto` -> `/LiveOS/overlay-<label>-<uuid>`) or directory | via `rd.luks.*` on the backing device | overlay file auto-created at boot only on writable media |
 
@@ -173,7 +173,9 @@ and copies the ISO's `LiveOS/` contents onto it. Persistence is a FILE,
   non-vfat fs it can grow to device capacity with no write-once exhaustion.
 
 `/home` can get its own `/LiveOS/home.img` (`--home-size-mb`),
-LUKS-encrypted by default; the root overlay itself is unencrypted by default.
+LUKS-encrypted by default; the persistence overlay that backs the rest of the
+root filesystem (the `/LiveOS/overlay-*` CoW file or the `--overlayfs`
+upper/work dirs described above) is unencrypted by default.
 Fedora Media Writer, which does a raw dd / isohybrid, explicitly does NOT
 support persistence and tells users to use `livecd-iso-to-disk` instead.
 

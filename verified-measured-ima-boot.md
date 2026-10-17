@@ -130,10 +130,13 @@ first instinct -- make the bootloader refuse anything but a signed UKI -- does
 NOT work on a Debian base, and it is worth stating plainly why:
 
 **No bootloader confines boot while Debian's (or Microsoft's) keys are trusted.**
-- Debian's stock GRUB has `linux`/`initrd` built in, ships no `pgp`/`verify`
-  module, and reads an UNSIGNED `grub.cfg`: rewrite grub.cfg (or use the `e`
-  menu) to `linux` the Debian-signed kernel with an evil initrd; `shim_lock`
-  checks only the kernel PE.
+- Debian's stock GRUB has `linux`/`initrd` built in and reads an UNSIGNED
+  `grub.cfg`. It DOES embed the `pgp`/`verify` module (`check_signatures`,
+  `verify_detached`, `trust` -- verified by `strings` on the trixie signed
+  `grubx64.efi`), but ships NO embedded trusted key and does not force
+  `check_signatures`, so there is no trust anchor by default. Rewrite grub.cfg
+  (or use the `e` menu) to `linux` the Debian-signed kernel with an evil initrd;
+  `shim_lock` checks only the kernel PE.
 - systemd-boot is no better. It also loads Boot Loader Specification **Type #1**
   entries (`linux` + a SEPARATE initrd), and per systemd's own `UEFI_SECURITY.md`
   "initrds are also not verified in BLS Type #1 configurations." Drop a
@@ -173,10 +176,13 @@ Sovereign Boot direction (next section); it buys PREVENTION rather than mere
 DETECTION, at the cost of out-of-the-box compatibility.
 
 An own-signed GRUB with `check_signatures=enforce` over grub.cfg+kernel+initrd
-(own `core.img` with `pgp`+`verify` built in, pubkey embedded, GRUB password)
-closes the GRUB layer -- but while the Debian key is
-still trusted an attacker swaps in Debian's signed systemd-boot or GRUB, so it
-only PREVENTS once Debian trust is also removed, i.e. it collapses into Anchor 2.
+closes the GRUB layer. The `pgp`/`verify` module is ALREADY in Debian's grub;
+what the own core adds is YOUR public key embedded as the trust anchor with
+enforcement forced -- and you cannot inject `--pubkey`/forced-enforce into
+Debian's PREBUILT SIGNED core without re-signing it (hence own core + a GRUB
+password). But while the Debian key is still trusted an attacker swaps in
+Debian's signed systemd-boot or GRUB, so it only PREVENTS once Debian trust is
+also removed, i.e. it collapses into Anchor 2.
 On its own it adds nothing over Anchor 1, and it still costs an own GRUB build.
 
 The practical shape for Kicksecure: Anchor 1 by default (keeps MS-shim
@@ -194,10 +200,13 @@ external-initramfs-signature RFC was rejected as insecure and never merged), and
 systemd-boot does not verify Type #1 (`linux`+`initrd`) entries either -- which
 is exactly why the UKI exists. The ONLY component that refuses to boot a tampered
 standalone initrd is GRUB with `check_signatures=enforce` verifying a detached
-GPG signature -- and that needs an OWN-SIGNED GRUB with the `pgp`/`verify` module
-built into its core (stock Debian `grubx64.efi` does not embed it, and Secure
-Boot forbids `insmod`). So "sign the initrd instead of a UKI" is not a shortcut:
-it IS the own-GRUB design, and it still needs your own key plus a
+GPG signature -- and for that to be non-bypassable you need an OWN-SIGNED GRUB
+core with YOUR public key embedded as the trust anchor and enforcement forced.
+(Debian's stock signed `grubx64.efi` DOES contain the `pgp`/`verify` module, but
+with no embedded trusted key and `check_signatures` unset by default, and you
+cannot inject `--pubkey`/forced-enforce into the prebuilt signed core without
+re-signing it -- so you build your own.) So "sign the initrd instead of a UKI" is
+not a shortcut: it IS the own-GRUB design, and it still needs your own key plus a
 re-sign-on-regeneration hook (`/etc/initramfs/post-update.d/`, which fires after
 every initramfs rebuild).
 
@@ -641,5 +650,5 @@ closes.
 - Shim is MS-CA-signed only; request for a Debian-CA-signed shim (keeps MOK without MS): Debian bug #1102680 https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1102680 ; Kicksecure Verified_Boot Keys section https://www.kicksecure.com/wiki/Verified_Boot#Keys
 - Dual-signing shim (append owner sig, MS sig survives): Authenticode digest excludes the cert table https://blog.trailofbits.com/2020/05/27/verifying-windows-binaries-without-windows/ ; Fedora multi-signed shim (2011+2023) https://fedoraproject.org/wiki/Test_Day:2026-01-12_Multi-signed_shim ; openSUSE dual-signed shim + ASUS firmware caveat https://forums.opensuse.org/t/secure-boot-asking-for-certificate-permission/132905 ; systemd-sbsign appends (vs sbsign replaces) https://manpages.opensuse.org/Tumbleweed/systemd-experimental/systemd-sbsign.1.en.html ; pesign https://man.archlinux.org/man/pesign.1
 - Kernel key sources (.builtin distro key; .platform from UEFI db; .machine from MOK via shim) + dm-verity platform-keyring (sovereign/self-enrolled, no MOK): https://www.kernel.org/doc/html/latest/admin-guide/module-signing.html ; CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIG_PLATFORM_KEYRING
-- Standalone initrd is not kernel-verified (2013 RFC rejected): https://lkml.iu.edu/hypermail/linux/kernel/1302.0/02432.html ; GRUB verifies a detached-signed initrd only with pgp built into its core (stock Debian lacks it): https://fedoraproject.org/wiki/Changes/Include_security_modules_in_efi_Grub2 ; systemd-stub/UKI rationale + PCR 11: https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; Debian re-sign hook points (/etc/initramfs/post-update.d/): https://kernel-team.pages.debian.net/kernel-handbook/ch-update-hooks.html
+- Standalone initrd is not kernel-verified (2013 RFC rejected): https://lkml.iu.edu/hypermail/linux/kernel/1302.0/02432.html ; GRUB verifies a detached-signed initrd via check_signatures/verify_detached: https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html (Debian's signed grubx64.efi embeds the pgp/verify module -- verified empirically by `strings` -- but ships no trusted key and does not force enforcement; Fedora's analogous build once lacked the modules entirely: https://fedoraproject.org/wiki/Changes/Include_security_modules_in_efi_Grub2 ) ; systemd-stub/UKI rationale + PCR 11: https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; Debian re-sign hook points (/etc/initramfs/post-update.d/): https://kernel-team.pages.debian.net/kernel-handbook/ch-update-hooks.html
 - Module sigs use .secondary (incl. .machine/MOK), NOT .platform/db -- `.machine` keyring patch (".machine ... trusted within the kernel", unlike .platform): https://kernsec.org/pipermail/linux-security-module-archive/2022-January/030363.html ; DKMS MOK workflow https://www.kicksecure.com/wiki/Secure_Boot ; RFC to trust db for modules (CONFIG_MODULE_SIG_PLATFORM, 2025, not merged): https://lkml.iu.edu/hypermail/linux/kernel/2506.0/01180.html

@@ -643,12 +643,17 @@ targets:
      attaching to the USB controller does.)
    - RESULT (TESTED, VBox 7.2.20, USB storage controller + `--usbxhci on`): the
      VM powered on but the EFI firmware enumerated ONLY the blank SATA disk and
-     printed "No bootable option or device was found" -- it did NOT enumerate the
-     USB-attached disk as a boot device. The IDENTICAL flat-VMDK on a SATA
-     controller booted Kicksecure fully (see 3), so this is a USB-path
-     limitation, not an image problem. The manual's USB-boot-under-EFI claim did
-     not hold here via firmware auto-discovery; treat VBox USB-device boot as
-     NON-WORKING.
+     printed "No bootable option or device was found" -- it did NOT boot the
+     USB-attached disk. We then entered the firmware by hand to rule out "just not
+     auto-discovered": the EFI Boot Manager listed only the two PXE entries (no
+     disk), and Boot Maintenance Manager -> Boot From File opened an EMPTY File
+     Explorer (no filesystem at all). So the firmware does not enumerate a
+     USB-storage-controller disk as a boot device OR a filesystem -- there is no
+     manual-selection or persisted-entry path either. The IDENTICAL flat-VMDK on
+     a SATA controller booted Kicksecure fully (see 3) and uses the same ESP, so
+     this is a USB-path limitation, not an image problem. The manual's
+     USB-boot-under-EFI claim did not hold in 7.2.20: treat VBox USB-device boot
+     as NON-WORKING (use the SATA flat-VMDK in 3 instead).
    - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
      not USB-boot even under EFI, above): for an old machine whose BIOS cannot
      USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --

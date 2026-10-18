@@ -729,9 +729,6 @@ at the end of this section).
 | Installed-base / network-effect inertia | the format the "many" already use | newer; must overcome inertia | opinion (pro-ISO) |
 | Net direction | keep it for install/try, VM, BMC/PXE, re-verifiable-hash, and read-only use | lead for the PERSISTENT artifact: real install, whole-root FDE, normal upgrades | ship BOTH, not either/or |
 
-Two gaps stay unsettled: Secure Boot handling (the sources are silent; our doc
-covers it under Known limitation) and a quantified ISO-vs-image size comparison.
-
 Third-way formats also considered (neither a plain ISO nor a whole-disk `.img`):
 
 - a single `.sfs` (kernel+initrd+sfs) -- easy to build (mksquashfs) and inspect,

@@ -599,6 +599,14 @@ Calamares from the ISO, separate from this feature.
 
 ### Testing in VirtualBox
 
+Note on "no `convertfromraw`": a flat-VMDK descriptor is a ~300-byte TEXT sidecar
+whose extent line is `RW <sectors> FLAT "image.raw" 0` -- it references the raw
+`.img` IN PLACE (the raw bytes are the storage), so it is NOT a conversion and
+copies nothing. `convertfromraw`, by contrast, writes a whole new VDI/VMDK with
+the data copied. VBox will not attach a completely bare `.img` as a disk, so the
+descriptor is the minimal zero-copy glue; booting through it IS booting the raw
+image. (QEMU needs no glue at all: `-drive file=image.img,format=raw`.)
+
 Three ways to test, from least to most confusable about which disk the installer
 targets:
 

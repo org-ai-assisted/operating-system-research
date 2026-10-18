@@ -664,7 +664,6 @@ delivery artifact -- see "Testing in VirtualBox".
 | Amnesic | yes, by default | on demand via `grub-live` | on demand via `grub-live` | on demand via `grub-live`; also the ISO (writes -> tmpfs) |
 | First-boot cost | none | fast (rekey + grow) | SLOW (unsquashfs: ~15-60 s on SSD, ~2-10 min on USB) | fast (grow) |
 | Tooling maturity / new code | mature (exists today) | standard install layout + systemd-repart; modest new build tooling | bespoke dracut/first-boot module; no prior art; brittle (power-loss mid-inflate) | more complex (verity/UKI/sealing); integrity bonus |
-| Status | KEEP (installer/try path) | CHOSEN | REJECTED (approach 7) | ALT (only way to get small + zero-step + persistence at once; not a plain install) |
 | Main advantage | familiar flow, zero-step compression, safest installer test | a real normal persistent FDE install; normal `apt`/kernel upgrades | small + plain + persistent all at once | small + zero-step + persistent + boot integrity |
 | Main disadvantage | not persistent -- it is amnesic by nature | `.xz` step for raw-`dd`/VirtualBox users; larger than squashfs/XZ | slow, brittle first boot + bespoke code for a cosmetic gain | immutable root (no plain in-place `apt`); most complexity |
 

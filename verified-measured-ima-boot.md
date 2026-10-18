@@ -301,19 +301,12 @@ order of how well they preserve the signature guarantee:
    is UNAUTHENTICATED; do not trust it.** Contrary to a common assumption, the stub
    appends this host/VMM-supplied string even with Secure Boot ON:
    `cmdline_append_and_measure_smbios()` is gated ONLY on `is_confidential_vm()`,
-   NOT on Secure Boot state (VERIFIED in `src/boot/stub.c`). The confidential-VM
-   gate exists because the SMBIOS tables are supplied by the host/hypervisor and
-   are NOT covered by the guest's attestation -- the stub comment is explicit:
-   "SMBIOS OEM Strings data is controlled by the host admin and not covered by the
-   VM attestation, so MUST NOT be trusted when in a confidential VM". So the stub
-   refuses the string exactly where the host sits OUTSIDE the trust boundary (a
-   confidential VM: AMD SEV/-ES/-SNP, Intel TDX -- detected in `src/boot/vmm.c` via
-   CPUID + the SEV MSR); in an ordinary VM the host already owns guest memory (it is
-   IN the TCB), so a host-supplied cmdline grants no new power and is honored. Its
-   only protection then is measurement into PCR 12 -- an untrusted hypervisor can
-   inject arguments. Treat it as a trusted-host / debug convenience, NOT a
-   Secure-Boot-safe mechanism. (It is the one option here that does not preserve the
-   SB authentication guarantee.)
+   NOT on Secure Boot state (VERIFIED in `src/boot/stub.c`). Its only protection is
+   measurement into PCR 12 -- an untrusted hypervisor can inject arguments. Treat it
+   as a trusted-host / debug convenience, NOT a Secure-Boot-safe mechanism. (It is
+   the one option here that does not preserve the SB authentication guarantee. Why
+   it is nonetheless ENABLED BY DEFAULT in every UKI, whether Kicksecure should do
+   the same, and the GRUB equivalent, get their own chapter below.)
 
 So Kicksecure's answer for users: ship signed addons for supported toggles (or
 re-sign the UKI via the kernel hook); never rely on SMBIOS for anything
@@ -322,51 +315,72 @@ security-relevant. These are upstream systemd mechanisms -- Debian ships
 tooling (and an own trusted key) is Kicksecure's to provide. (Credential addons
 `<uki>.efi.extra.d/*.cred` exist too, but carry data, not cmdline.)
 
-GRUB's `smbios` command on its own only sets a GRUB variable -- it does not reach
-the kernel cmdline unless a distro interpolates that variable into
-`GRUB_CMDLINE_LINUX`. Kicksecure's derivative-maker does exactly that, as an
-OPT-IN, dangerous-by-design CI/boot-test feature (the `--smbios-reader` build flag;
-default OFF): an `/etc/grub.d` snippet reads SMBIOS Type 1 (only when the
-manufacturer is `QEMU`), extracts a `dm-cmdline=...` prefix from the serial-number
-string via `regexp` into `${dm_smbios_extra}`, and appends that to the kernel
-cmdline (also enabling a serial console and instant boot). It is the GRUB analogue
-of systemd-stub's `io.systemd.stub.kernel-cmdline-extra`. So GRUB CAN ingest a
-host-supplied SMBIOS string as kernel arguments -- but only because the DISTRO
-wires it, and Kicksecure treats that wiring as a backdoor: off by default, gated
-behind a dangerous-option confirmation, deleted from any image not built with the
-flag, and documented "quite literally backdoored by design ... [to] NEVER be
-created or used except in very specific testing scenarios."
+Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (cmdline override/addons, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c
 
-That reader does NOT honor a confidential-VM check, and (unlike systemd-stub) it
-does not need one: systemd ships its SMBIOS reader ENABLED in every UKI, so it must
-refuse the input at runtime wherever the host is untrusted (the
-`is_confidential_vm()` guard); Kicksecure's reader is never present in a production
-or confidential-VM image in the first place -- the control is build-time EXCLUSION,
-not a runtime gate. A runtime CVM gate would be hard to add anyway: a Secure-Boot
-grub.cfg has no robust confidential-VM primitive. GRUB's `cpuid` command exposes
-only long-mode/PAE, not the SEV leaf `0x8000001f` or the TDX leaf `0x21`; there is
-no `is_confidential_vm` equivalent; and the MSR route (`rdmsr 0xC0010131`) depends
-on the signed `grubx64.efi` actually shipping the `rdmsr` module, which distros
-normally curate OUT of the signed core (the real Secure-Boot barrier -- NOT GRUB
-lockdown, which blocks only the write/leak primitives `wrmsr`/`iorw`-write/`memrw`,
-not `rdmsr`). TDX is thus undetectable from grub.cfg at all; SEV only non-robustly
-and essentially BIOS-only. (The `QEMU`-manufacturer gate is also not a security
-boundary -- the host sets that SMBIOS string.)
+## SMBIOS kernel command-line reader (enable-by-default?)
 
-GRUB's broader, always-present gap is the one this note returns to throughout: its
-kernel cmdline comes from an UNSIGNED `grub.cfg`/`grubenv` (and the interactive `e`
-editor) on host-controlled storage, authenticated only by `check_signatures=enforce`
-or by baking the config into the signed `core.img`, and otherwise merely MEASURED
-into PCR 8 (the `tpm` module logs each `kernel_cmdline:` string). That
-unsigned-config family -- CVE-2020-10713 "BootHole" (Red Hat: grub.cfg parsing
-bypasses Secure Boot), Debian bug #906124 (the `check_signatures`/`pgp` regression
-and its own SB-bypass hazard) -- is exactly what the UKI's single signed-and-measured
-image is meant to close. So the GRUB-world answer to "change the cmdline safely" is
-the own-GRUB design (own key in `core.img` + `check_signatures` over a signed
-`grub.cfg`), not a signed-addon or SMBIOS mechanism.
+Letting the host/hypervisor inject extra kernel command-line arguments through
+SMBIOS is a real, shipped pattern, and a recurring question is whether to enable it
+BY DEFAULT. The honest answer turns entirely on whether the reader can refuse the
+input in a confidential VM.
 
+**What exists.** systemd-stub reads `io.systemd.stub.kernel-cmdline-extra` from
+SMBIOS Type 11 and appends it to the cmdline (measured into PCR 12). It is ENABLED
+BY DEFAULT in every UKI -- there is no opt-in -- and the ONLY guard is
+`is_confidential_vm()` (a compiled CPUID + SEV-MSR / TDX check in
+`src/boot/vmm.c`). Kicksecure's derivative-maker has the GRUB equivalent, but
+inverted: an OPT-IN (default-OFF), dangerous-gated reader (the `--smbios-reader`
+build flag) whose `/etc/grub.d/01_smbios-reader` snippet reads the QEMU SMBIOS
+Type 1 serial `dm-cmdline=...` into `${dm_smbios_extra}` and appends it (via
+`etc/default/grub.d/99_smbios-cmdline.cfg` for the installed system and `dm-raw-to-iso`
+for the ISO), used only for CI/boot-test and documented "quite literally backdoored
+by design ... [to] NEVER be created or used except in very specific testing
+scenarios." The SAME host-to-config pattern is default-on and ACCEPTED elsewhere
+wherever the host is trusted: cloud-init's NoCloud datasource (seed from the
+DMI/SMBIOS serial), QEMU `fw_cfg` (direct kernel/initrd/cmdline, Ignition/RHCOS
+delivery).
 
-Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee ; Kicksecure derivative-maker opt-in SMBIOS cmdline reader (--smbios-reader): packages/kicksecure/vm-config-dist/etc/grub.d/01_smbios-reader, etc/default/grub.d/99_smbios-cmdline.cfg, iso-build-data/grub-config/smbios-reader.cfg (repo Kicksecure/derivative-maker) ; GRUB cpuid.c (long-mode/PAE only) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/cpuid.c ; GRUB rdmsr.c (not lockdown-gated) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/rdmsr.c ; GRUB lockdown framework https://www.gnu.org/software/grub/manual/grub-dev/html_node/Lockdown-framework.html ; CVE-2020-10713 BootHole (grub.cfg unauthenticated, Red Hat) https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 (grub check_signatures/pgp) https://bugs.debian.org/906124
+**Was default-on considered secure? Yes, upstream, and the reasoning transfers.**
+systemd's default-on reader was deliberated in issue #27604 and merged as PR #28301
+("cvm-lockdown", v254). The accepted threat model: in a NON-confidential VM the
+hypervisor already fully controls the guest's memory and execution, so a
+host-supplied cmdline grants NO new privilege -- there is nothing to defend against.
+The only case where it must be refused is a confidential VM, where the host is
+OUTSIDE the attested TCB; hence the single `is_confidential_vm()` gate. So "enable
+by default" and "honor is_confidential_vm" are not independent choices -- the CVM
+guard is the PRECONDITION that makes default-on safe. (Kicksecure's current
+`QEMU`-manufacturer gate is not a substitute: the host sets that string, and it does
+not detect a CVM.)
+
+**Can GRUB honor is_confidential_vm? -- the blocker.** Research result (as of
+2026-10): there is NO GRUB `is_confidential_vm` primitive, NO savannah bug, and NO
+grub-devel patch that gates behavior on running in a confidential VM -- a clear
+NEGATIVE. The nearest items are a measured-boot gap (savannah #65821, "missing
+measurements on Intel TDX"; status not primary-verified -- savannah serves an
+anti-scraper page to automated clients), GRUB SEV launch-secret / LUKS work, and --
+most tellingly -- Fedora's FESCo-approved "Light GRUB for Confidential Computing,"
+which has GRUB chainload a UKI rather than add any CVM logic to GRUB. Technically a
+signed `grub.cfg` cannot robustly detect a CVM: `cpuid` exposes only long-mode/PAE
+(not the SEV leaf `0x8000001f` or TDX leaf `0x21`), `rdmsr` is normally curated OUT
+of the signed `grubx64.efi`, and in a CVM the grub.cfg is itself host-controlled and
+unmeasured -- so any script-level gate is unsigned and bypassable. The detection
+must be COMPILED into a signed, measured component.
+
+**Conclusion for Kicksecure.** On stock grub.cfg-level SMBIOS reading, enable-by-
+default is NOT safe, because the CVM guard cannot be implemented robustly there --
+keep it opt-in and dangerous-gated. The clean way to get "enabled by default AND
+CVM-guarded" is the UKI / sd-stub path this note already recommends: ship UKIs and
+inherit systemd-stub's default-on reader WITH its `is_confidential_vm()` guard,
+already reviewed and shipped upstream. Fedora's grub-to-UKI decision is the same
+conclusion reached independently by a GRUB-based distro. So this is one more
+concrete argument for the UKI direction -- the host-cmdline convenience that is
+safe-by-default on sd-stub is not safely default-able on GRUB. (GRUB's broader,
+always-present gap -- the UNSIGNED `grub.cfg`/`grubenv` and interactive `e` editor,
+authenticated only by `check_signatures`/signed `core.img` and otherwise merely
+MEASURED into PCR 8; CVE-2020-10713 "BootHole", Debian #906124 -- is exactly what
+that single signed-and-measured image closes.)
+
+Sources: systemd-stub (SMBIOS reader) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; systemd stub.c https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; cvm-lockdown issue #27604 https://github.com/systemd/systemd/issues/27604 and PR #28301 https://github.com/systemd/systemd/pull/28301 ; cloud-init NoCloud (DMI/SMBIOS seed) https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html ; QEMU fw_cfg https://www.qemu.org/docs/master/specs/fw_cfg.html ; Kicksecure derivative-maker --smbios-reader: packages/kicksecure/vm-config-dist/etc/grub.d/01_smbios-reader, etc/default/grub.d/99_smbios-cmdline.cfg, iso-build-data/grub-config/smbios-reader.cfg (repo Kicksecure/derivative-maker) ; GRUB cpuid.c (long-mode/PAE only) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/cpuid.c ; GRUB rdmsr.c https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/rdmsr.c ; GRUB savannah bug tracker https://savannah.gnu.org/bugs/?group=grub (bug #65821 measured-boot/TDX, status not primary-verified) ; Fedora Light GRUB for Confidential Computing https://fedoraproject.org/wiki/Changes/Grub2LightForConfidentialComputing and FESCo #3626 https://forge.fedoraproject.org/fesco/tickets/issues/3626 ; GRUB SEV launch-secret thread https://mail.gnu.org/archive/html/grub-devel/2021-02/msg00117.html ; CVE-2020-10713 BootHole https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 https://bugs.debian.org/906124
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 

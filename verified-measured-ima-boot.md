@@ -322,25 +322,51 @@ security-relevant. These are upstream systemd mechanisms -- Debian ships
 tooling (and an own trusted key) is Kicksecure's to provide. (Credential addons
 `<uki>.efi.extra.d/*.cred` exist too, but carry data, not cmdline.)
 
-GRUB has NO counterpart to the SMBIOS channel, so the confidential-VM guard above
-has no GRUB analogue: GRUB never ingests SMBIOS/DMI/`fw_cfg` OEM strings as kernel
-arguments (its `smbios` command only sets a shell variable on explicit request --
-it is not wired to the boot cmdline), so there is nothing for it to refuse in a
-confidential VM. GRUB's analogous gap is the broader one this note returns to
-throughout: its kernel cmdline comes from an UNSIGNED `grub.cfg`/`grubenv` (and the
-interactive `e` editor) on host-controlled storage, authenticated only by
-`check_signatures=enforce` or by baking the config into the signed `core.img`, and
-otherwise merely MEASURED into PCR 8 (the `tpm` module logs each `kernel_cmdline:`
-string). That unsigned-config family -- CVE-2020-10713 "BootHole" (Red Hat:
-grub.cfg parsing bypasses Secure Boot), Debian bug #906124 (the
-`check_signatures`/`pgp` regression and its own SB-bypass hazard) -- is exactly
-what the UKI's single signed-and-measured image is meant to close. So the
-GRUB-world answer to "change the cmdline safely" is the own-GRUB design (own key in
-`core.img` + `check_signatures` over a signed `grub.cfg`), not a signed-addon
-mechanism.
+GRUB's `smbios` command on its own only sets a GRUB variable -- it does not reach
+the kernel cmdline unless a distro interpolates that variable into
+`GRUB_CMDLINE_LINUX`. Kicksecure's derivative-maker does exactly that, as an
+OPT-IN, dangerous-by-design CI/boot-test feature (the `--smbios-reader` build flag;
+default OFF): an `/etc/grub.d` snippet reads SMBIOS Type 1 (only when the
+manufacturer is `QEMU`), extracts a `dm-cmdline=...` prefix from the serial-number
+string via `regexp` into `${dm_smbios_extra}`, and appends that to the kernel
+cmdline (also enabling a serial console and instant boot). It is the GRUB analogue
+of systemd-stub's `io.systemd.stub.kernel-cmdline-extra`. So GRUB CAN ingest a
+host-supplied SMBIOS string as kernel arguments -- but only because the DISTRO
+wires it, and Kicksecure treats that wiring as a backdoor: off by default, gated
+behind a dangerous-option confirmation, deleted from any image not built with the
+flag, and documented "quite literally backdoored by design ... [to] NEVER be
+created or used except in very specific testing scenarios."
+
+That reader does NOT honor a confidential-VM check, and (unlike systemd-stub) it
+does not need one: systemd ships its SMBIOS reader ENABLED in every UKI, so it must
+refuse the input at runtime wherever the host is untrusted (the
+`is_confidential_vm()` guard); Kicksecure's reader is never present in a production
+or confidential-VM image in the first place -- the control is build-time EXCLUSION,
+not a runtime gate. A runtime CVM gate would be hard to add anyway: a Secure-Boot
+grub.cfg has no robust confidential-VM primitive. GRUB's `cpuid` command exposes
+only long-mode/PAE, not the SEV leaf `0x8000001f` or the TDX leaf `0x21`; there is
+no `is_confidential_vm` equivalent; and the MSR route (`rdmsr 0xC0010131`) depends
+on the signed `grubx64.efi` actually shipping the `rdmsr` module, which distros
+normally curate OUT of the signed core (the real Secure-Boot barrier -- NOT GRUB
+lockdown, which blocks only the write/leak primitives `wrmsr`/`iorw`-write/`memrw`,
+not `rdmsr`). TDX is thus undetectable from grub.cfg at all; SEV only non-robustly
+and essentially BIOS-only. (The `QEMU`-manufacturer gate is also not a security
+boundary -- the host sets that SMBIOS string.)
+
+GRUB's broader, always-present gap is the one this note returns to throughout: its
+kernel cmdline comes from an UNSIGNED `grub.cfg`/`grubenv` (and the interactive `e`
+editor) on host-controlled storage, authenticated only by `check_signatures=enforce`
+or by baking the config into the signed `core.img`, and otherwise merely MEASURED
+into PCR 8 (the `tpm` module logs each `kernel_cmdline:` string). That
+unsigned-config family -- CVE-2020-10713 "BootHole" (Red Hat: grub.cfg parsing
+bypasses Secure Boot), Debian bug #906124 (the `check_signatures`/`pgp` regression
+and its own SB-bypass hazard) -- is exactly what the UKI's single signed-and-measured
+image is meant to close. So the GRUB-world answer to "change the cmdline safely" is
+the own-GRUB design (own key in `core.img` + `check_signatures` over a signed
+`grub.cfg`), not a signed-addon or SMBIOS mechanism.
 
 
-Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee ; GRUB has no SMBIOS->cmdline path (smbios command sets a variable only) ; CVE-2020-10713 BootHole (grub.cfg unauthenticated, Red Hat) https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 (grub check_signatures/pgp) https://bugs.debian.org/906124
+Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee ; Kicksecure derivative-maker opt-in SMBIOS cmdline reader (--smbios-reader): packages/kicksecure/vm-config-dist/etc/grub.d/01_smbios-reader, etc/default/grub.d/99_smbios-cmdline.cfg, iso-build-data/grub-config/smbios-reader.cfg (repo Kicksecure/derivative-maker) ; GRUB cpuid.c (long-mode/PAE only) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/cpuid.c ; GRUB rdmsr.c (not lockdown-gated) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/rdmsr.c ; GRUB lockdown framework https://www.gnu.org/software/grub/manual/grub-dev/html_node/Lockdown-framework.html ; CVE-2020-10713 BootHole (grub.cfg unauthenticated, Red Hat) https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 (grub check_signatures/pgp) https://bugs.debian.org/906124
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 

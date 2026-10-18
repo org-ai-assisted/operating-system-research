@@ -653,7 +653,13 @@ targets:
      a SATA controller booted Kicksecure fully (see 3) and uses the same ESP, so
      this is a USB-path limitation, not an image problem. The manual's
      USB-boot-under-EFI claim did not hold in 7.2.20: treat VBox USB-device boot
-     as NON-WORKING (use the SATA flat-VMDK in 3 instead).
+     as NON-WORKING (use the SATA flat-VMDK in 3 instead). Corroborated by a VBox
+     forum moderator (forums.virtualbox.org thread t=87303): "Neither the BIOS nor
+     the EFI implementations allow for a USB controller based disk to boot" (same
+     setup -- a disk on the usb storage controller, invisible to EFI, booting fine
+     on SATA). The manual's "USB-attached drives boot under EFI" line apparently
+     means physical USB passthrough (rawdisk), not a disk on the usb storage
+     controller; no on-point bugtracker ticket documents it.
    - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
      not USB-boot even under EFI, above): for an old machine whose BIOS cannot
      USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --

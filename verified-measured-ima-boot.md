@@ -270,6 +270,52 @@ itself.
 
 Sources: standalone initrd not kernel-verified, 2013 RFC https://lkml.iu.edu/hypermail/linux/kernel/1302.0/02432.html ; GRUB GPG-style digital signatures https://www.gnu.org/software/grub/manual/grub/html_node/Using-GPG_002dstyle-digital-signatures.html ; Fedora grub security modules https://fedoraproject.org/wiki/Changes/Include_security_modules_in_efi_Grub2 ; systemd-stub/UKI rationale https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; Debian re-sign hook points https://kernel-team.pages.debian.net/kernel-handbook/ch-update-hooks.html ; Gentoo Secure Boot/GRUB https://wiki.gentoo.org/wiki/Secure_Boot/GRUB ; Libreboot/Canoeboot GRUB hardening https://canoeboot.org/docs/gnulinux/grub_hardening.html ; Debian bug #906124 https://bugs.debian.org/906124
 
+### Changing the kernel command line under a signed UKI
+
+A signed UKI fixes the command line (its signed `.cmdline` section), so "edit the
+boot entry" does NOT work under Secure Boot. The legitimate ways to change it, in
+order of how well they preserve the signature guarantee:
+
+1. **Rebuild + re-sign the UKI with the owner's key (canonical).** Edit the source
+   cmdline (`kernel-install` reads it from the first of `/etc/kernel/cmdline`,
+   `/usr/lib/kernel/cmdline`, `/proc/cmdline`), regenerate with
+   `ukify --cmdline=...`, re-sign with `--secureboot-private-key` /
+   `--secureboot-certificate`. Preserves the guarantee fully -- the key holder is
+   the trust root. This is the same postinst/kernel-hook re-sign Kicksecure runs
+   anyway (fact 3); `/etc/kernel/cmdline` is the Debian edit point.
+2. **Signed UKI addons (append without rebuilding).** `*.addon.efi` PE files carry
+   an extra `.cmdline` (built by `ukify build --cmdline=...` in addon mode, then
+   PE-signed). systemd-stub loads global addons from `/loader/addons/*.addon.efi`
+   and per-UKI addons from `<uki>.efi.extra.d/*.addon.efi` and -- verbatim -- "In
+   case Secure Boot is enabled, these files will be validated using keys in UEFI
+   DB, Shim's DB or Shim's MOK, and only loaded if the check passes." An unsigned
+   addon is rejected under SB, so the guarantee holds. Concatenation order: UKI
+   cmdline first, then global addons, then per-UKI addons; all measured into PCR 12.
+3. **Boot-menu editing is BLOCKED (not merely discouraged).** The sd-boot `e`
+   editor passes a cmdline as EFI invocation parameters, but systemd-stub's
+   `settle_command_line()` DROPS it when `secure_boot_enabled() && (a .cmdline
+   section is present || confidential VM)` (VERIFIED in `src/boot/stub.c`). So
+   editing silently has NO effect for a signed UKI under SB; an override needs
+   either SB off or a UKI shipped WITHOUT a `.cmdline` section.
+4. **SMBIOS Type 11 (`io.systemd.stub.kernel-cmdline-extra`) -- works under SB but
+   is UNAUTHENTICATED; do not trust it.** Contrary to a common assumption, the stub
+   appends this host/VMM-supplied string even with Secure Boot ON:
+   `cmdline_append_and_measure_smbios()` is gated ONLY on `is_confidential_vm()`,
+   NOT on Secure Boot state (VERIFIED in `src/boot/stub.c`). Its only protection is
+   measurement into PCR 12 -- an untrusted hypervisor can inject arguments. Treat it
+   as a trusted-host / debug convenience, NOT a Secure-Boot-safe mechanism. (It is
+   the one option here that does not preserve the SB authentication guarantee.)
+
+So Kicksecure's answer for users: ship signed addons for supported toggles (or
+re-sign the UKI via the kernel hook); never rely on SMBIOS for anything
+security-relevant. These are upstream systemd mechanisms -- Debian ships
+`ukify`/`kernel-install` but documents no addon wrapper, so the addon-signing
+tooling (and an own trusted key) is Kicksecure's to provide. (Credential addons
+`<uki>.efi.extra.d/*.cred` exist too, but carry data, not cmdline.)
+
+
+Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c
+
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 
 The default key strategy and Sovereign Boot live at different layers and are
@@ -362,8 +408,10 @@ PREVENTION.** The options:
   signed once; the initrd is inside the signed envelope) over a dm-verity root --
   less effort and more robust than own-GRUB+`check_signatures`. Two complementary
   delivery modes: (i) MS-signed own shim via rhboot/shim-review (boots out-of-box
-  on stock Microsoft-key machines; a small Debian derivative, Lernstick, is
-  precedent, and Kicksecure's prevention goal answers shim-review's "why not reuse
+  on stock Microsoft-key machines; a small Debian derivative, [Lernstick](https://www.bfh.ch/en/research/research-areas/lernstick/),
+  is precedent -- it ships its OWN MS-signed shim built on Debian's GRUB and
+  kernel (shim-review [issue #528](https://github.com/rhboot/shim-review/issues/528),
+  2026) -- and Kicksecure's prevention goal answers shim-review's "why not reuse
   Debian's shim"); (ii) Sovereign own-key -- the owner enrolls Kicksecure's
   PK/KEK/db via the Dasharo/3mdeb wizard and the SAME Kicksecure-signed shim/UKI
   boots natively, no Microsoft. Ongoing cost (the real one): owning a shim means
@@ -486,7 +534,7 @@ real guarantee is measured boot + TPM-sealing/attestation (detection), with
 Sovereign Boot for loader-level prevention.
 
 
-Sources: Debian grub signed-image modules https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot https://wiki.debian.org/SecureBoot
+Sources: Debian grub signed-image modules https://salsa.debian.org/grub-team/grub/-/raw/master/debian/build-efi-images ; Debian SecureBoot https://wiki.debian.org/SecureBoot ; IPE (Integrity Policy Enforcement) LSM https://docs.kernel.org/admin-guide/LSM/ipe.html
 
 ## Measured boot for remote attestation
 
@@ -673,7 +721,9 @@ cut -- and MOK keeps working for DKMS/out-of-tree modules (MOK is shim-inherent)
 Deliver it both ways, from the same Kicksecure-signed artifacts:
 - **MS-signed own shim via shim-review** -- prevention that ALSO boots out-of-box
   on stock Microsoft-key machines. Precedent exists for small Debian derivatives
-  (Lernstick). Cost: an upstream-based reproducible build, HSM key custody, a
+  ([Lernstick](https://www.bfh.ch/en/research/research-areas/lernstick/), whose
+  own shim is built on Debian GRUB + a trixie kernel). Cost: an upstream-based
+  reproducible build, HSM key custody, a
   verified security contact, and the recurring SBAT/CVE re-review-and-re-sign
   treadmill.
 - **Sovereign own-key (Dasharo/3mdeb wizard)** -- the owner enrolls Kicksecure's
@@ -698,7 +748,7 @@ Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM,
 or a local-hash dpkg hook, to a frozen-appliance scope until Debian gains
 package-level file signing.
 
-Sources: rhboot/shim-review https://github.com/rhboot/shim-review (Lernstick + small-derivative precedent) ; Dasharo/3mdeb Sovereign Boot wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; shim SBAT lifecycle https://sources.debian.org/src/shim/16.1-1/SBAT.md ; MS UEFI CA 2023 (post-2026-06-27 signing) https://lwn.net/Articles/1079808/
+Sources: rhboot/shim-review https://github.com/rhboot/shim-review ; Lernstick (Debian-based live system, BFH) https://www.bfh.ch/en/research/research-areas/lernstick/ and its shim-review precedent https://github.com/rhboot/shim-review/issues/528 ; Dasharo/3mdeb Sovereign Boot wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; shim SBAT lifecycle https://sources.debian.org/src/shim/16.1-1/SBAT.md ; MS UEFI CA 2023 (post-2026-06-27 signing) https://lwn.net/Articles/1079808/
 
 
 ## Open product decisions

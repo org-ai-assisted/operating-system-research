@@ -606,10 +606,10 @@ targets:
    read-only optical device; Calamares cannot offer it as a destination, so the
    wrong-target mistake is impossible. This is the installer/try path (the ISO
    artifact), not the persistent `.img`.
-2. The `.img` as a virtual USB/removable device (MIDDLE -- mirrors a physical
-   USB-boot + install-to-internal-disk, and the removable medium is still
-   distinguishable from the fixed target). Possible in VirtualBox 7.x WITHOUT
-   `convertfromraw`, but EFI-ONLY:
+2. The `.img` as a virtual USB/removable device -- TESTED, does NOT work in
+   VirtualBox 7.2.20. The intent (mirror a physical USB-boot, and keep the
+   removable medium distinguishable from the fixed Calamares target) rested on
+   the 7.x manual's "USB-attached drives boot under EFI". We ran it:
    - VirtualBox 7.x has a real USB storage controller; each disk attached to it
      "appears as a dedicated USB device to the guest." But: "Booting from drives
      attached using USB is only supported when EFI is used as the BIOS lacks USB
@@ -633,16 +633,18 @@ targets:
      fixed internal disk. (`--hotpluggable`/`--nonrotational` only set hot-plug
      and SSD hints -- they do NOT make a non-USB-controller disk removable; only
      attaching to the USB controller does.)
-   - CONFIDENCE: the USB controller, the EFI-only USB-boot restriction, and the
-     RawDrive-is-physical-only facts are verbatim from the official 7.x manual.
-     The flat-VMDK-descriptor-for-a-file technique is a well-known community
-     method, NOT in the manual, and we have NOT yet run this recipe end to end
-     (there is no appliance `.img` built yet). Label it expected-not-tested until
-     verified.
-   - USB boot under BIOS firmware (workaround): the USB path above is EFI-ONLY.
-     If a VM must run the BIOS firmware and still USB-boot, the options, best
-     first: (a) just enable EFI (the first-line answer -- the restriction is
-     VBox-BIOS-only); (b) use QEMU instead of VirtualBox -- its default SeaBIOS
+   - RESULT (TESTED, VBox 7.2.20, USB storage controller + `--usbxhci on`): the
+     VM powered on but the EFI firmware enumerated ONLY the blank SATA disk and
+     printed "No bootable option or device was found" -- it did NOT enumerate the
+     USB-attached disk as a boot device. The IDENTICAL flat-VMDK on a SATA
+     controller booted Kicksecure fully (see 3), so this is a USB-path
+     limitation, not an image problem. The manual's USB-boot-under-EFI claim did
+     not hold here via firmware auto-discovery; treat VBox USB-device boot as
+     NON-WORKING.
+   - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
+     not USB-boot even under EFI, above): for an old machine whose BIOS cannot
+     USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --
+     its default SeaBIOS
      firmware (Free Software, Debian `seabios`) boots USB natively, no shim;
      (c) if it must be VBox BIOS, boot a GRUB2 (BIOS) rescue ISO from the
      virtual DVD and `insmod ehci uhci ohci usbms` then chainload the USB disk
@@ -656,18 +658,21 @@ targets:
      MEMDISK do NOT help (no USB host-controller drivers); writing a bespoke
      real-mode USB boot manager is a person-years systems project (reuse
      GRUB2/SeaBIOS), not a worthwhile build.
-3. The `.img` as a plain virtual HARD DISK (WORST for installer testing): attach
-   the same flat-VMDK descriptor to SATA (no convertfromraw), or
-   `VBoxManage convertfromraw image.img image.vdi` (copies data). It boots under
-   whichever firmware the image's layout supports (the ESP-only appliance layout
-   is UEFI-only unless it also carries a `bios_grub` partition), and presents as a
-   FIXED disk indistinguishable from the target, inviting a wrong-target pick in
-   Calamares.
+3. The `.img` as a plain virtual HARD DISK (flat-VMDK on SATA) -- TESTED, WORKS
+   under BOTH EFI and BIOS, with NO `convertfromraw`. Attach the same flat-extent
+   VMDK descriptor to a SATA controller (`storageattach ... --type hdd --medium
+   image.vmdk`); the raw `.img` is referenced in place, no data copy. Verified: a
+   100 GiB Kicksecure-LXQt raw (GPT: ESP + `bios_grub` + root) booted to the LXQt
+   desktop under `--firmware efi` AND `--firmware bios`. This is the working
+   no-convert way to test the appliance `.img` in VBox. Downside (unchanged): it
+   presents as a FIXED disk, indistinguishable from a blank target in Calamares,
+   so the ISO-on-DVD path (1) stays safest for installer testing; the
+   removable-USB distinguishability idea (2) is not achievable in VBox.
 
 For the persistent appliance `.img` itself (booting it as a normal install, no
-installer), any of the three attaches it; the plain-disk route is the safe
-default, and the USB-device route only under EFI (the flat-VMDK-on-USB recipe
-above is expected-not-tested until the empirical check runs).
+installer), the SATA flat-VMDK route (3) is the working attach -- no
+`convertfromraw`, boots under EFI or BIOS. The USB-device route (2) did not boot
+in VBox.
 
 ### Artifacts
 

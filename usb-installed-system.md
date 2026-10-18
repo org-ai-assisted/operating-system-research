@@ -673,20 +673,17 @@ Legend (GitHub-rendered emoji; the source stays ASCII shortcodes):
 | Main advantage | familiar flow, zero-step compression, safest installer test | a real normal persistent FDE install; normal `apt`/kernel upgrades | small + plain + persistent all at once | small + zero-step + persistent + boot integrity |
 | Main disadvantage | not persistent -- it is amnesic by nature | `.xz` step for raw-`dd`/VirtualBox users; larger than squashfs/XZ | slow, brittle first boot + bespoke code for a cosmetic gain | immutable root (no plain in-place `apt`); most complexity |
 
-### ISO vs drive-image: criteria from the EasyOS "ISO must die" debate
+### ISO vs drive-image: delivery-format criteria
 
-EasyOS (Barry Kauler) dropped the ISO and ships only a raw drive-image `.img`,
-and argued the case at length. The criteria below are extracted from that page,
-Barry's two blog posts, the EasyOS install/update docs, and the OSNews + TinyCore
-forum debate (the primary Puppy forum thread was bot-blocked, so its points come
-via Barry's verbatim quotes and the independent OSNews thread). They apply to ISO
-vs ANY drive-image (our appliance `.img`, self-inflating, or verity-split are all
-"drive-image" here). Each is tagged: `fact` objective, `bk` EasyOS opinion, `cp`
-forum/OSNews counterpoint.
+The criteria below weigh an ISO against ANY raw drive-image (our appliance
+`.img`, self-inflating, and verity-split are all "drive-image" here). Each is
+tagged: `fact` objective, `opinion` a maintainer/advocate view, `cp` a
+counterpoint. Drawn from a survey of the ISO-vs-drive-image debate (see Sources
+at the end of this section).
 
 | Criterion | ISO | Drive-image (`.img`) | Kind |
 |---|---|---|---|
-| Format lineage | ISO9660 (1988) + hybrid bolt-ons | native modern disk layout | fact + bk |
+| Format lineage | ISO9660 (1988) + hybrid bolt-ons | native modern disk layout | fact + opinion |
 | How it writes to USB | isohybrid is a dd-hack layered over iso9660 (bends the spec) | a real partitioned disk, dd'd natively | fact |
 | Geometry/size honesty | partition table misstates CHS/GPT size | same ambiguity -- not actually cleaner | cp |
 | USB write workflow | same tools + "boot from it" step | same tools + step | fact (neutral) |
@@ -697,7 +694,7 @@ forum/OSNews counterpoint.
 | Immutability | read-only by nature | writable | fact (cuts both ways) |
 | Kernel/initrd update | rebuild the whole ISO | replace `vmlinuz` / swap initrd+sfs in place, or normal `apt` | fact |
 | Edit files on the medium | no | yes (mount/click the `.img`) | fact |
-| BIOS + UEFI boot | isohybrid serves both via hybrid cruft | standard ESP, simple on both; single-stage menu | fact + bk |
+| BIOS + UEFI boot | isohybrid serves both via hybrid cruft | standard ESP, simple on both; single-stage menu | fact + opinion |
 | dd-to-USB UEFI issues | can occur | avoided (native image) | cp (pro-image) |
 | Secure Boot / signing | EasyOS does not document it | EasyOS does not document it -- OUR doc covers it (see Known limitation) | gap |
 | Download form | `.iso` | `.img.gz`/`.img.xz` (decompress, or xz-aware flasher) | fact |
@@ -713,7 +710,7 @@ forum/OSNews counterpoint.
 | Optical / non-USB-bootable legacy PCs | CD-R still works | needs USB-boot or a frugal install | cp (pro-ISO, marginal) |
 | Read-only clean environment (banking/forensics) | tamper-resistant | writable | cp (pro-ISO) |
 | At-rest encryption | n/a (read-only) | fscrypt/LUKS on the working partition | fact (pro-image) |
-| Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | bk (pro-image) |
+| Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | opinion (pro-image) |
 | Cost of shipping BOTH | an ISO build is cheap and well-trodden | -- | cp (dropping ISO is motivation, not a tech blocker) |
 | Standards / anti-fragmentation / user choice | proven cross-platform standard | newer, less universal | cp (pro-ISO) |
 | Host-OS inspect/mount of the container | Windows natively mounts/burns ISO | multi-partition `.img`/`.sfs` not easily opened on Windows (EasyOS click-opens on Linux) | cp (pro-ISO) |
@@ -731,7 +728,7 @@ forum/OSNews counterpoint.
 | VM-trial / adoption barrier | easy VM trial via the virtual DVD | dropping ISO entirely blocks easy VM trial -> adoption/UX cost | opinion (pro-ISO) |
 | Installed-base / network-effect inertia | the format the "many" already use | newer; must overcome inertia | opinion (pro-ISO) |
 
-Synthesis: EasyOS's pro-image criteria (real partition table, out-of-the-box
+Synthesis: the pro-image criteria (real partition table, out-of-the-box
 persistence, grow-to-fill, in-place kernel/initrd edits, simpler BIOS+UEFI, at-rest
 encryption, one maintenance model) reinforce the appliance `.img` as the
 persistent artifact. But the forum/OSNews counterpoints (BMC/IPMI virtual-media,
@@ -760,6 +757,12 @@ Third-way formats floated in the thread (neither a plain ISO nor a whole-disk
 - a hybrid-ISO with an appended writable partition (keeps the ISO and gains
   persistence);
 - an `img`<->`iso` converter so no producer is forced to ship both.
+
+Sources (reference): EasyOS "why the ISO format has to die"
+(easyos.org/about/why-the-iso-format-has-to-die.html) + bkhome.org blog + the
+EasyOS install/update docs; the OSNews discussion (osnews.com/?p=134318); and the
+Puppy Linux forum thread "Should ISO format be retired?"
+(forum.puppylinux.com/viewtopic.php?t=4690).
 
 
 ## Open questions / scoping

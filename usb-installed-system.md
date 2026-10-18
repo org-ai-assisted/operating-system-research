@@ -696,15 +696,15 @@ at the end of this section).
 | Edit files on the medium | no | yes (mount/click the `.img`) | fact |
 | BIOS + UEFI boot | isohybrid serves both via hybrid cruft | standard ESP, simple on both; single-stage menu | fact + opinion |
 | dd-to-USB UEFI issues | can occur | avoided (native image) | cp (pro-image) |
-| Secure Boot / signing | EasyOS does not document it | EasyOS does not document it -- OUR doc covers it (see Known limitation) | gap |
+| Secure Boot / signing | the surveyed sources are silent | silent -- OUR doc covers it (see Known limitation) | gap |
 | Download form | `.iso` | `.img.gz`/`.img.xz` (decompress, or xz-aware flasher) | fact |
 | Download size head-to-head | not published anywhere | not published anywhere | gap |
-| Flashing-tool ecosystem | huge (Rufus, Etcher, Ventoy, YUMI, Unetbootin) | easydd / USB Image Tool; Ventoy also writes `.img` | cp (ISO breadth) |
+| Flashing-tool ecosystem | huge (many mainstream flashers + multiboot tools) | fewer image writers; some multiboot tools also write `.img` | cp (ISO breadth) |
 | Re-verify vs published hash | yes, any time (read-only) | no -- it mutates on first boot (rekey/grow) | cp (pro-ISO) |
-| Write verification | format-independent (easydd checksums after write) | same | fact (neutral) |
+| Write verification | format-independent (the writer can checksum after write) | same | fact (neutral) |
 | VM import | boots from the virtual DVD directly | often needs `.img` -> VDI/VMDK conversion | cp/fact (pro-ISO) |
 | VM drive-mapping | predictable (DVD is not a disk) | as a disk it can confuse primary vs secondary | cp (pro-ISO) |
-| Multiboot managers | native ISO ecosystem | Ventoy supports `.img`; smaller ecosystem | cp (pro-ISO) |
+| Multiboot managers | native ISO ecosystem | multiboot managers can boot `.img` too; smaller ecosystem | cp (pro-ISO) |
 | Remote/BMC virtual media (IPMI/iDRAC/iLO) | mounts an ISO -- the sysadmin standard | a raw `.img` is generally not a BMC media type | cp (pro-ISO, strong) |
 | PXE / netinst | strong ecosystem | weaker for a raw image | cp (pro-ISO) |
 | Optical / non-USB-bootable legacy PCs | CD-R still works | needs USB-boot or a frugal install | cp (pro-ISO, marginal) |
@@ -713,39 +713,26 @@ at the end of this section).
 | Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | opinion (pro-image) |
 | Cost of shipping BOTH | an ISO build is cheap and well-trodden | -- | cp (dropping ISO is motivation, not a tech blocker) |
 | Standards / anti-fragmentation / user choice | proven cross-platform standard | newer, less universal | cp (pro-ISO) |
-| Host-OS inspect/mount of the container | Windows natively mounts/burns ISO | multi-partition `.img`/`.sfs` not easily opened on Windows (EasyOS click-opens on Linux) | cp (pro-ISO) |
+| Host-OS inspect/mount of the container | Windows natively mounts/burns ISO | multi-partition `.img`/`.sfs` not easily opened on Windows (click-opens on Linux) | cp (pro-ISO) |
 | Drive-image vs rootfs-image | -- | a PARTITIONED drive-image click-opens (N partitions); the "opaque/nested" gripe is about ROOTFS-images, not this | fact (clarifies pro-image) |
-| Direct-file-boot (Ventoy/SG2D) | boots ISO | ALSO boots `.img`/VHD (EasyOS `.img` booted via Ventoy empirically) -- not ISO-exclusive | fact (neutral) |
+| Direct-file-boot (multiboot managers) | boots ISO | ALSO boots `.img`/VHD in practice -- not ISO-exclusive | fact (neutral) |
 | ...but needs build-time support | initrd search code + loopback.conf baked by the creator | same -- a build-time choice, not a free container property | fact (neutral) |
-| Frugal-install INSTALLER ecosystem | Frugalpup / Lick (Windows dual-boot) consume ISO | migrating them to `.img` = re-coding; also covers install-to-internal-drive + Win dual-boot | cp (pro-ISO, migration cost) |
+| Frugal-install INSTALLER ecosystem | existing frugal-install + Windows dual-boot installers consume ISO | migrating them to `.img` = re-coding; also covers install-to-internal-drive + Win dual-boot | cp (pro-ISO, migration cost) |
 | Multi-distro coexistence on one stick | many distros as frugal installs on one boot menu | `.img` wants the whole stick; reclaim/add is manual | cp (pro-ISO) |
 | dd invocation footgun | burn/GUI tools hide it | exact `dd` command error-prone for newbies; they want a GUI installer | cp (pro-ISO) |
-| Secure Boot cert copy fidelity | most ISO->USB tools OMIT the distro `.cer` (only Stickpup kept it) | a writable image can carry it | cp (concrete SB-gap datapoint) |
-| `.img.gz` loop-mount on tiny storage | ISO/SFS loop-mount as shipped | cannot mount a `.gz` without first writing the full uncompressed `.img`; BarryK's fix: ~8 MB 2nd partition so compressed ~= uncompressed, then ship an UNCOMPRESSED `.img` | fact + pro-image resolution |
+| Secure Boot cert copy fidelity | most ISO->USB tools OMIT the distro `.cer` (only a few keep it) | a writable image can carry it | cp (concrete SB-gap datapoint) |
+| `.img.gz` loop-mount on tiny storage | ISO/SFS loop-mount as shipped | cannot mount a `.gz` without first writing the full uncompressed `.img`; a fix: a tiny ~8 MB 2nd partition so compressed ~= uncompressed, then ship an UNCOMPRESSED `.img` | fact + pro-image resolution |
 | VM: QEMU vs VirtualBox | universal virtual optical drive | QEMU boots a raw `.img` directly (`-hda`, no convert); VirtualBox needs a VDI/VMDK wrapper | fact (QEMU easy, VBox friction) |
 | Size-ceiling as anti-bloat discipline | CD/DVD ceiling nudges smaller builds | no inherent ceiling | opinion (pro-ISO, marginal) |
 | Optical disc as archival hard-copy | durable physical recovery fallback | -- | opinion (pro-ISO; discs degrade, drives vanishing) |
 | VM-trial / adoption barrier | easy VM trial via the virtual DVD | dropping ISO entirely blocks easy VM trial -> adoption/UX cost | opinion (pro-ISO) |
 | Installed-base / network-effect inertia | the format the "many" already use | newer; must overcome inertia | opinion (pro-ISO) |
+| Net direction | keep it for install/try, VM, BMC/PXE, re-verifiable-hash, and read-only use | lead for the PERSISTENT artifact: real install, whole-root FDE, normal upgrades | ship BOTH, not either/or |
 
-Synthesis: the pro-image criteria (real partition table, out-of-the-box
-persistence, grow-to-fill, in-place kernel/initrd edits, simpler BIOS+UEFI, at-rest
-encryption, one maintenance model) reinforce the appliance `.img` as the
-persistent artifact. But the forum/OSNews counterpoints (BMC/IPMI virtual-media,
-PXE, multiboot-manager reach, VM drive-mapping, re-verifiability against a
-published hash, read-only as a clean-environment security property, and the low
-cost of just shipping an ISO too) are precisely the reasons to KEEP the ISO for
-the install/try path rather than drop it -- i.e. the debate supports shipping
-BOTH, not replacing one with the other. Two gaps no source settles: Secure Boot
-handling (EasyOS silent; our doc addresses it) and a quantified ISO-vs-image size
-comparison. The thread also sharpens two points for us: QEMU boots a raw `.img`
-directly so "VMs need an ISO" is weak there, but VirtualBox still needs a wrapper
-(the friction our own "Testing in VirtualBox" section documents); and BarryK's
-tiny-2nd-partition trick (ship an UNCOMPRESSED `.img` that is already small)
-dissolves the decompress-step objection without any flasher dependency.
+Two gaps stay unsettled: Secure Boot handling (the sources are silent; our doc
+covers it under Known limitation) and a quantified ISO-vs-image size comparison.
 
-Third-way formats floated in the thread (neither a plain ISO nor a whole-disk
-`.img`), recorded for completeness:
+Third-way formats also considered (neither a plain ISO nor a whole-disk `.img`):
 
 - a single `.sfs` (kernel+initrd+sfs) -- easy to build (mksquashfs) and inspect,
   but no Windows host tooling;
@@ -757,12 +744,6 @@ Third-way formats floated in the thread (neither a plain ISO nor a whole-disk
 - a hybrid-ISO with an appended writable partition (keeps the ISO and gains
   persistence);
 - an `img`<->`iso` converter so no producer is forced to ship both.
-
-Sources (reference): EasyOS "why the ISO format has to die"
-(easyos.org/about/why-the-iso-format-has-to-die.html) + bkhome.org blog + the
-EasyOS install/update docs; the OSNews discussion (osnews.com/?p=134318); and the
-Puppy Linux forum thread "Should ISO format be retired?"
-(forum.puppylinux.com/viewtopic.php?t=4690).
 
 
 ## Open questions / scoping

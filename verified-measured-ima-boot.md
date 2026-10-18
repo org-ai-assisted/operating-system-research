@@ -11,7 +11,7 @@ This note states the problem, records three facts that reframe it, surveys how
 the major projects solve it (named, with citations), lays out the viable
 designs, reports what was empirically settled in a sandbox, and records the
 recommended direction. It is the successor to the "measured/sealed boot chain"
-limitation flagged at the end of [live-usb-persistence.md](live-usb-persistence.md).
+limitation flagged at the end of [usb-installed-system.md](usb-installed-system.md).
 
 Scope: the integrity MECHANISM (what verifies what, and how trust is anchored).
 The read-only-root / overlay / state-separation machinery is covered where it

@@ -651,21 +651,25 @@ that decide between them. "choice" = first boot asks the user (G2). VM-test
 formats (qcow2 / VMDK / OVA) are a separate testing convenience, not a user
 delivery artifact -- see "Testing in VirtualBox".
 
+Legend (GitHub-rendered emoji; the source stays ASCII shortcodes):
+:white_check_mark: yes / strong, :x: no / absent, :warning: caveat / partial,
+:heavy_minus_sign: not applicable.
+
 | Feature | ISO (live + installer) | Appliance `.img.xz` | Self-inflating squashfs `.img` | Verity-split-root `.img` |
 |---|---|---|---|---|
 | Role | live/try + Calamares installer source | pre-installed normal persistent system on the USB | plain `.img` with a squashfs inside that inflates to a rw root on first boot | read-only compressed `/usr` + writable LUKS state |
-| Whole-root persistence (G1) | no (amnesic; persists only after installing to a SEPARATE disk) | yes (a real install) | yes (after the first-boot inflate) | yes (state in the writable split; root itself immutable) |
-| Root FDE, default=choice (G2) | only via the Calamares install-to-disk, not on the ISO | yes, whole-root LUKS; encrypt-or-not is a first-boot choice | yes (inflate into a LUKS container) | yes for the writable state; `/usr` is public read-only |
-| Download size (G6) | small (squashfs/XZ inside) | medium (btrfs/f2fs-zstd at rest, then `.xz`); bigger than squashfs/XZ | small (squashfs inside, no outer wrapper) | small (squashfs/erofs `/usr`) |
-| Outer wrapper / decompress step (G7) | none -- boots and flashes compressed, zero step | `.xz` wrapper; zero-step only on xz-aware flashers, else a manual `xz -d` | none (plain dd-able `.img`, zero step) | can ship as a plain `.img` (compressed at rest), zero step |
-| dd / flasher compatibility | dd-able isohybrid; DVD-burnable | dd-able after `xz -d`; one step on xz-native flashers | dd-able | dd-able |
-| Familiar VBox test (G5) | BEST -- attach to the virtual DVD and boot | middle -- attach as a virtual USB (EFI) or hard disk | middle -- as USB/HDD | middle -- one image can back BOTH an ISO and a disk |
-| Calamares wrong-target safety | BEST -- read-only DVD source can never be the target | n/a (no installer; boots directly) | n/a (no installer) | n/a (no installer) |
+| Whole-root persistence (G1) | :x: no (amnesic; persists only after installing to a SEPARATE disk) | :white_check_mark: yes (a real install) | :white_check_mark: yes (after the first-boot inflate) | :white_check_mark: yes (state in the writable split; root itself immutable) |
+| Root FDE, default=choice (G2) | :warning: only via the Calamares install-to-disk, not on the ISO | :white_check_mark: yes, whole-root LUKS; encrypt-or-not is a first-boot choice | :white_check_mark: yes (inflate into a LUKS container) | :white_check_mark: yes for the writable state; `/usr` is public read-only |
+| Download size (G6) | :white_check_mark: small (squashfs/XZ inside) | :warning: medium (btrfs/f2fs-zstd at rest, then `.xz`); bigger than squashfs/XZ | :white_check_mark: small (squashfs inside, no outer wrapper) | :white_check_mark: small (squashfs/erofs `/usr`) |
+| Outer wrapper / decompress step (G7) | :white_check_mark: none -- boots and flashes compressed, zero step | :warning: `.xz` wrapper; zero-step only on xz-aware flashers, else a manual `xz -d` | :white_check_mark: none (plain dd-able `.img`, zero step) | :white_check_mark: can ship as a plain `.img` (compressed at rest), zero step |
+| dd / flasher compatibility | :white_check_mark: dd-able isohybrid; DVD-burnable | :warning: dd-able after `xz -d`; one step on xz-native flashers | :white_check_mark: dd-able | :white_check_mark: dd-able |
+| Familiar VBox test (G5) | :white_check_mark: BEST -- attach to the virtual DVD and boot | :warning: middle -- attach as a virtual USB (EFI) or hard disk | :warning: middle -- as USB/HDD | :warning: middle -- one image can back BOTH an ISO and a disk |
+| Calamares wrong-target safety | :white_check_mark: BEST -- read-only DVD source can never be the target | :heavy_minus_sign: n/a (no installer; boots directly) | :heavy_minus_sign: n/a (no installer) | :heavy_minus_sign: n/a (no installer) |
 | Boot medium / rootfs | read-only whole-disk iso9660 + squashfs | writable GPT disk; btrfs/f2fs(zstd) root, plaintext `/boot`, LUKS root | writable disk; squashfs staging -> rw root | writable disk; dm-verity read-only `/usr` + writable state |
-| Kernel upgrades | n/a while live; normal once installed | normal (new kernel lands in `/boot`, GRUB reads it) | normal (after inflate) | image-based (A/B or reseal), NOT plain apt-in-place |
-| Amnesic | yes, by default | on demand via `grub-live` | on demand via `grub-live` | on demand via `grub-live`; also the ISO (writes -> tmpfs) |
-| First-boot cost | none | fast (rekey + grow) | SLOW (unsquashfs: ~15-60 s on SSD, ~2-10 min on USB) | fast (grow) |
-| Tooling maturity / new code | mature (exists today) | standard install layout + systemd-repart; modest new build tooling | bespoke dracut/first-boot module; no prior art; brittle (power-loss mid-inflate) | more complex (verity/UKI/sealing); integrity bonus |
+| Kernel upgrades | :warning: n/a while live; normal once installed | :white_check_mark: normal (new kernel lands in `/boot`, GRUB reads it) | :white_check_mark: normal (after inflate) | :warning: image-based (A/B or reseal), NOT plain apt-in-place |
+| Amnesic | :white_check_mark: yes, by default | :white_check_mark: on demand via `grub-live` | :white_check_mark: on demand via `grub-live` | :white_check_mark: on demand via `grub-live`; also the ISO (writes -> tmpfs) |
+| First-boot cost | :white_check_mark: none | :white_check_mark: fast (rekey + grow) | :warning: SLOW (unsquashfs: ~15-60 s on SSD, ~2-10 min on USB) | :white_check_mark: fast (grow) |
+| Tooling maturity / new code | :white_check_mark: mature (exists today) | :warning: standard install layout + systemd-repart; modest new build tooling | :x: bespoke dracut/first-boot module; no prior art; brittle (power-loss mid-inflate) | :warning: more complex (verity/UKI/sealing); integrity bonus |
 | Main advantage | familiar flow, zero-step compression, safest installer test | a real normal persistent FDE install; normal `apt`/kernel upgrades | small + plain + persistent all at once | small + zero-step + persistent + boot integrity |
 | Main disadvantage | not persistent -- it is amnesic by nature | `.xz` step for raw-`dd`/VirtualBox users; larger than squashfs/XZ | slow, brittle first boot + bespoke code for a cosmetic gain | immutable root (no plain in-place `apt`); most complexity |
 

@@ -716,6 +716,20 @@ forum/OSNews counterpoint.
 | Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | bk (pro-image) |
 | Cost of shipping BOTH | an ISO build is cheap and well-trodden | -- | cp (dropping ISO is motivation, not a tech blocker) |
 | Standards / anti-fragmentation / user choice | proven cross-platform standard | newer, less universal | cp (pro-ISO) |
+| Host-OS inspect/mount of the container | Windows natively mounts/burns ISO | multi-partition `.img`/`.sfs` not easily opened on Windows (EasyOS click-opens on Linux) | cp (pro-ISO) |
+| Drive-image vs rootfs-image | -- | a PARTITIONED drive-image click-opens (N partitions); the "opaque/nested" gripe is about ROOTFS-images, not this | fact (clarifies pro-image) |
+| Direct-file-boot (Ventoy/SG2D) | boots ISO | ALSO boots `.img`/VHD (EasyOS `.img` booted via Ventoy empirically) -- not ISO-exclusive | fact (neutral) |
+| ...but needs build-time support | initrd search code + loopback.conf baked by the creator | same -- a build-time choice, not a free container property | fact (neutral) |
+| Frugal-install INSTALLER ecosystem | Frugalpup / Lick (Windows dual-boot) consume ISO | migrating them to `.img` = re-coding; also covers install-to-internal-drive + Win dual-boot | cp (pro-ISO, migration cost) |
+| Multi-distro coexistence on one stick | many distros as frugal installs on one boot menu | `.img` wants the whole stick; reclaim/add is manual | cp (pro-ISO) |
+| dd invocation footgun | burn/GUI tools hide it | exact `dd` command error-prone for newbies; they want a GUI installer | cp (pro-ISO) |
+| Secure Boot cert copy fidelity | most ISO->USB tools OMIT the distro `.cer` (only Stickpup kept it) | a writable image can carry it | cp (concrete SB-gap datapoint) |
+| `.img.gz` loop-mount on tiny storage | ISO/SFS loop-mount as shipped | cannot mount a `.gz` without first writing the full uncompressed `.img`; BarryK's fix: ~8 MB 2nd partition so compressed ~= uncompressed, then ship an UNCOMPRESSED `.img` | fact + pro-image resolution |
+| VM: QEMU vs VirtualBox | universal virtual optical drive | QEMU boots a raw `.img` directly (`-hda`, no convert); VirtualBox needs a VDI/VMDK wrapper | fact (QEMU easy, VBox friction) |
+| Size-ceiling as anti-bloat discipline | CD/DVD ceiling nudges smaller builds | no inherent ceiling | opinion (pro-ISO, marginal) |
+| Optical disc as archival hard-copy | durable physical recovery fallback | -- | opinion (pro-ISO; discs degrade, drives vanishing) |
+| VM-trial / adoption barrier | easy VM trial via the virtual DVD | dropping ISO entirely blocks easy VM trial -> adoption/UX cost | opinion (pro-ISO) |
+| Installed-base / network-effect inertia | the format the "many" already use | newer; must overcome inertia | opinion (pro-ISO) |
 
 Synthesis: EasyOS's pro-image criteria (real partition table, out-of-the-box
 persistence, grow-to-fill, in-place kernel/initrd edits, simpler BIOS+UEFI, at-rest
@@ -727,7 +741,25 @@ cost of just shipping an ISO too) are precisely the reasons to KEEP the ISO for
 the install/try path rather than drop it -- i.e. the debate supports shipping
 BOTH, not replacing one with the other. Two gaps no source settles: Secure Boot
 handling (EasyOS silent; our doc addresses it) and a quantified ISO-vs-image size
-comparison.
+comparison. The thread also sharpens two points for us: QEMU boots a raw `.img`
+directly so "VMs need an ISO" is weak there, but VirtualBox still needs a wrapper
+(the friction our own "Testing in VirtualBox" section documents); and BarryK's
+tiny-2nd-partition trick (ship an UNCOMPRESSED `.img` that is already small)
+dissolves the decompress-step objection without any flasher dependency.
+
+Third-way formats floated in the thread (neither a plain ISO nor a whole-disk
+`.img`), recorded for completeness:
+
+- a single `.sfs` (kernel+initrd+sfs) -- easy to build (mksquashfs) and inspect,
+  but no Windows host tooling;
+- a ZIP / self-extracting `.exe` / tar -- extract-to-target = a frugal install
+  (ZIP loses Unix ownership/permissions; tar keeps them);
+- QCOW2 -- built-in encryption, dynamic grow, snapshots, native to QEMU;
+- a tiny cross-platform download-script that fetches vmlinuz/initrd/sfs and adds
+  a boot entry (no formatting, no image);
+- a hybrid-ISO with an appended writable partition (keeps the ISO and gains
+  persistence);
+- an `img`<->`iso` converter so no producer is forced to ship both.
 
 
 ## Open questions / scoping

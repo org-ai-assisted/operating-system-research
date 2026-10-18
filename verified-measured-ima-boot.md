@@ -301,10 +301,19 @@ order of how well they preserve the signature guarantee:
    is UNAUTHENTICATED; do not trust it.** Contrary to a common assumption, the stub
    appends this host/VMM-supplied string even with Secure Boot ON:
    `cmdline_append_and_measure_smbios()` is gated ONLY on `is_confidential_vm()`,
-   NOT on Secure Boot state (VERIFIED in `src/boot/stub.c`). Its only protection is
-   measurement into PCR 12 -- an untrusted hypervisor can inject arguments. Treat it
-   as a trusted-host / debug convenience, NOT a Secure-Boot-safe mechanism. (It is
-   the one option here that does not preserve the SB authentication guarantee.)
+   NOT on Secure Boot state (VERIFIED in `src/boot/stub.c`). The confidential-VM
+   gate exists because the SMBIOS tables are supplied by the host/hypervisor and
+   are NOT covered by the guest's attestation -- the stub comment is explicit:
+   "SMBIOS OEM Strings data is controlled by the host admin and not covered by the
+   VM attestation, so MUST NOT be trusted when in a confidential VM". So the stub
+   refuses the string exactly where the host sits OUTSIDE the trust boundary (a
+   confidential VM: AMD SEV/-ES/-SNP, Intel TDX -- detected in `src/boot/vmm.c` via
+   CPUID + the SEV MSR); in an ordinary VM the host already owns guest memory (it is
+   IN the TCB), so a host-supplied cmdline grants no new power and is honored. Its
+   only protection then is measurement into PCR 12 -- an untrusted hypervisor can
+   inject arguments. Treat it as a trusted-host / debug convenience, NOT a
+   Secure-Boot-safe mechanism. (It is the one option here that does not preserve the
+   SB authentication guarantee.)
 
 So Kicksecure's answer for users: ship signed addons for supported toggles (or
 re-sign the UKI via the kernel hook); never rely on SMBIOS for anything
@@ -314,7 +323,7 @@ tooling (and an own trusted key) is Kicksecure's to provide. (Credential addons
 `<uki>.efi.extra.d/*.cred` exist too, but carry data, not cmdline.)
 
 
-Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c
+Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 

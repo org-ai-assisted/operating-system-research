@@ -3,21 +3,23 @@
 How do you give a USB you boot from whole-root persistence -- ideally with
 full-disk encryption -- on the SAME medium the system booted from? This note
 surveys how the major projects solve it, identifies the one constraint that
-rules out the naive approach, and records the design chosen for
-Kicksecure/Whonix.
+rules out the naive approach, and weighs the delivery options for
+Kicksecure/Whonix. NOTHING is decided yet -- this records the leading candidate
+and the tradeoffs, not a final choice.
 
 A naming note up front: "persistent live USB" is a contradiction in terms. A
 LIVE system is amnesic by design -- it runs from read-only media and discards
 state at shutdown -- so it cannot also be persistent. The survey below shows
 every genuine live-overlay route is either blocked (the whole-disk iso9660
-constraint) or a bolt-on, and the chosen design resolves the contradiction by
-dropping "live" entirely: it ships a normal, persistent install on the USB and
+constraint) or a bolt-on, and the leading (appliance) design resolves the
+contradiction by dropping "live" entirely: it ships a normal, persistent install
+on the USB and
 lets `grub-live` provide amnesic-on-demand as an opt-in mode. So this is a
 bootable/installed USB system, NOT a live USB -- which is why this note is named
 `usb-installed-system`, not "live-usb-persistence".
 
 Scope: Kicksecure/Whonix use dracut `dmsquash-live` with an overlayfs union
-root. The findings generalize, but the decision at the end is specific to
+root. The findings generalize, but the recommendation at the end is specific to
 that stack.
 
 
@@ -73,7 +75,7 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   and immutable; it can be neither a writable persistent root nor a writable
   LUKS FDE root. squashfs-as-root is the same live-vs-persistent contradiction
   restated at the filesystem layer.
-  - Resolution already chosen (see Compression below): compress the DOWNLOAD
+  - Resolution proposed (see Compression below): compress the DOWNLOAD
     (`.img.xz` + `.bmap`, decompressed on the fly while flashing / before
     `convertfromraw`), run on a read-WRITE btrfs/f2fs `compress=zstd` root --
     compressed and persistent, larger than squashfs/XZ but far smaller than raw
@@ -121,7 +123,7 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
 
 Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) and the
 zero-extra-step usability goal (G7) are mutually exclusive with the
-plain-normal-persistent-FDE-install appliance in the Decision below, UNLESS the
+plain-normal-persistent-FDE-install appliance candidate below, UNLESS the
 design moves to the verity-split-root model, which reconciles them but is not a
 plain install.
 
@@ -319,7 +321,7 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
    it for raw-dd.
 
 6. Appliance model -- ship a pre-installed normal disk image. See below. This
-   is the chosen direction.
+   is the current front-runner (nothing is decided yet).
 
 7. Self-inflating squashfs `.img` -- ship a PLAIN `.img` (dd-compatible, no
    outer `.xz`) that is small because its rootfs is a squashfs INSIDE the image;
@@ -331,16 +333,16 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
    squashfs" below.
 
 
-## Decision for Kicksecure/Whonix: the appliance model
+## Leading candidate (not yet decided): the appliance model
 
-Requirements that shaped the choice: whole-root persistence that behaves like
+Requirements that shape the leaning toward it: whole-root persistence that behaves like
 a normal install; full-disk encryption (not just `/home`) available, with the
 encrypt-or-not decision left to the user as an explicit first-boot CHOICE (not
 silently defaulted on or off); a second disk as an option; and -- a late
 reframing -- amnesic boot is NOT required as the default, because `grub-live`
 already provides amnesic-on-demand from the GRUB menu on any installed system.
 
-Given that, the live-overlay models (3, 4) are the wrong frame. The chosen
+Given that, the live-overlay models (3, 4) are the wrong frame. The appliance
 design ships a PRE-INSTALLED normal Kicksecure disk image (`.img`, the same
 kind of partitioned install dracut/Debian produce for VM images), flashed to
 the USB. It boots as a genuinely normal persistent install; `grub-live`
@@ -649,7 +651,7 @@ that decide between them. "choice" = first boot asks the user (G2). VM-test
 formats (qcow2 / VMDK / OVA) are a separate testing convenience, not a user
 delivery artifact -- see "Testing in VirtualBox".
 
-| Feature | ISO (live + installer) | Appliance `.img.xz` (CHOSEN) | Self-inflating squashfs `.img` | Verity-split-root `.img` |
+| Feature | ISO (live + installer) | Appliance `.img.xz` | Self-inflating squashfs `.img` | Verity-split-root `.img` |
 |---|---|---|---|---|
 | Role | live/try + Calamares installer source | pre-installed normal persistent system on the USB | plain `.img` with a squashfs inside that inflates to a rw root on first boot | read-only compressed `/usr` + writable LUKS state |
 | Whole-root persistence (G1) | no (amnesic; persists only after installing to a SEPARATE disk) | yes (a real install) | yes (after the first-boot inflate) | yes (state in the writable split; root itself immutable) |

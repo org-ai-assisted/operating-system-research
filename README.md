@@ -8,12 +8,12 @@ citations) solve it, judges the options, and records the decision.
 
 ## Index
 
-- [live-usb-persistence.md](live-usb-persistence.md) -- how to provide
-  persistent storage (and full-disk encryption) on a live USB the system
-  booted from. Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`,
-  Ubuntu casper/mkusb, Ventoy, and dracut `dmsquash-live`; records the shift
-  from a live-overlay model to a pre-installed appliance-image model for
-  Kicksecure/Whonix.
+- [usb-installed-system.md](usb-installed-system.md) -- how to provide
+  whole-root persistence (and full-disk encryption) on a USB you boot from.
+  Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`, Ubuntu
+  casper/mkusb, Ventoy, and dracut `dmsquash-live`; records the shift from a
+  live-overlay model to a pre-installed appliance-image model for
+  Kicksecure/Whonix (a normal install on a USB, not a live USB).
 - [verified-measured-ima-boot.md](verified-measured-ima-boot.md) -- verified,
   measured, and IMA boot for a Debian base (live ISO and installed) to a
   PREVENTION (Sovereign/Secure Boot) standard, keeping MOK and BIOS. Surveys

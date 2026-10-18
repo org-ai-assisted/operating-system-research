@@ -14,12 +14,14 @@ citations) solve it, judges the options, and records the decision.
   Ubuntu casper/mkusb, Ventoy, and dracut `dmsquash-live`; records the shift
   from a live-overlay model to a pre-installed appliance-image model for
   Kicksecure/Whonix.
-- [verified-measured-ima-boot.md](verified-measured-ima-boot.md) -- verified
-  boot, measured boot, and IMA for a Debian base (live ISO and installed),
-  keeping GRUB and BIOS. Surveys systemd/ParticleOS, Fedora bootc/composefs,
-  openSUSE MicroOS, Ubuntu Core, Arch/verity-squash-root, Android/ChromeOS,
-  Flatcar, Azure Linux, Talos, Garden Linux; settles two facts empirically in a
-  Secure Boot + TPM sandbox; shows no bootloader confines boot while Debian/MS
-  keys are trusted, so the guarantee is measured boot + TPM-sealing/attestation
-  (detection) with Sovereign Boot for prevention; signed UKIs via shim ->
-  systemd-boot, dm-verity roothash on the signed cmdline, IMA measurement-only.
+- [verified-measured-ima-boot.md](verified-measured-ima-boot.md) -- verified,
+  measured, and IMA boot for a Debian base (live ISO and installed) to a
+  PREVENTION (Sovereign/Secure Boot) standard, keeping MOK and BIOS. Surveys
+  systemd/ParticleOS, Fedora bootc/composefs, openSUSE MicroOS, Ubuntu Core,
+  Arch/verity-squash-root, Android/ChromeOS, Flatcar, Azure Linux, Talos, Garden
+  Linux; settles facts empirically in a Secure Boot + TPM sandbox; shows no
+  Debian-derived shim prevents (Debian's shim embeds the Debian CA), so
+  prevention requires an OWN Kicksecure shim (own VENDOR_CERT, via shim-review
+  and/or Sovereign own-key) chainloading a Kicksecure-signed UKI (Debian
+  kernel+initrd) over dm-verity, MOK preserved; measured boot + TPM-sealed FDE as
+  defense-in-depth; IMA measurement-only.

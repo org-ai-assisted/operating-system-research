@@ -1,10 +1,11 @@
 # Verified, measured, and IMA boot
 
 How do you give a Debian-based distribution (Kicksecure/Whonix) verified boot,
-measured boot, and an Integrity Measurement Architecture (IMA) path -- for both
-the live ISO and the installed system -- while keeping GRUB, leaving the kernel
-and initrd to Debian, keeping legacy BIOS as a fallback, and staying on a road
-that can reach remote attestation later?
+measured boot, and an Integrity Measurement Architecture (IMA) path to a
+PREVENTION standard (Sovereign / Secure Boot -- BLOCK a tampered boot, not merely
+detect it) -- for both the live ISO and the installed system -- while keeping
+MOK functional, leaving the kernel and initrd to Debian, keeping legacy BIOS as a
+fallback, and staying on a road that can reach remote attestation later?
 
 This note states the problem, records three facts that reframe it, surveys how
 the major projects solve it (named, with citations), lays out the viable
@@ -352,12 +353,24 @@ PREVENTION.** The options:
   multi-signed shims, but those are MS+MS or MS+distro signatures, not
   MS+sovereign-owner; the owner-plus-MS case is an extrapolation and breaks
   exactly at the MS-in-`dbx` end.
-- **(c) Own shim -- the only prevention-WITH-MOK path.** Build a shim carrying the
-  OWNER's own `VENDOR_CERT` (so it launches ONLY owner-signed GRUB/UKI), made
-  bootable under Secure Boot either via shim-review (Microsoft-signed) or
-  self-signed + enrolled through `db`/MOK. This is the sole way to keep MOK AND
-  cut the evil-initrd path; earlier drafts never listed it. Larger undertaking
-  (own shim build + SB enablement) -- genuinely new ground for Kicksecure.
+- **(c) Own shim -- the prevention-WITH-MOK path (the goal).** Build a Kicksecure
+  shim whose `VENDOR_CERT` is the KICKSECURE key, so it chainloads ONLY
+  Kicksecure-signed stages -- stock Debian-signed GRUB is rejected, cutting the
+  evil-initrd path, while the shim still provides the full MOK layer (MOK is
+  shim-inherent, independent of which cert is baked in). The next stage is a
+  Kicksecure-signed UKI (`ukify` bundles Debian's STOCK vmlinuz+initrd+cmdline,
+  signed once; the initrd is inside the signed envelope) over a dm-verity root --
+  less effort and more robust than own-GRUB+`check_signatures`. Two complementary
+  delivery modes: (i) MS-signed own shim via rhboot/shim-review (boots out-of-box
+  on stock Microsoft-key machines; a small Debian derivative, Lernstick, is
+  precedent, and Kicksecure's prevention goal answers shim-review's "why not reuse
+  Debian's shim"); (ii) Sovereign own-key -- the owner enrolls Kicksecure's
+  PK/KEK/db via the Dasharo/3mdeb wizard and the SAME Kicksecure-signed shim/UKI
+  boots natively, no Microsoft. Ongoing cost (the real one): owning a shim means
+  owning its SBAT generation and the shim/GRUB-CVE treadmill -- rebuild on the new
+  upstream shim, bump SBAT, re-run shim-review, re-sign, and ship the fixed shim
+  BEFORE the revocation lands -- plus HSM key custody and a monitored security
+  contact.
 - **(d) Full Sovereign Boot** -- drop shim, own `db` keys, MS (and, for real
   prevention, Debian's CA too) in `dbx`, sign only own UKIs. Prevention, but MOK
   is gone, so out-of-tree module signing would then need the kernel-rebuild route
@@ -649,50 +662,57 @@ only, no Secure Boot, no measured boot, not marketed as "verified boot."
 
 ## Recommended direction
 
-Default to **Anchor 1 (detection)** -- ship signed UKIs (via GRUB chainloading
-the UKI, or `shim -> systemd-boot` where systemd-boot is used); `ukify` bundles
-Debian's stock kernel+initrd, MOK-enrolled key, dm-verity roothash on the UKI's
-signed cmdline, PCR 11. Bind the FDE key to the expected PCRs (PCR 7 +11, not the
-volatile 8/9) with `systemd-cryptenroll` + `systemd-pcrlock` so a tampered boot
-cannot obtain the sealed key and fails attestation -- keeping an offline recovery
-key (and noting a surviving passphrase keyslot is still capturable, so this is
-detection). The security comes from the TPM, not the loader -- no loader refuses
-the tampered path while Debian/MS keys are trusted. This keeps MS-shim
-compatibility and works out of the box, as Ubuntu Core / Talos / Fedora sealed
-deliver.
+The goal is PREVENTION (Sovereign / Secure Boot level), not merely detection. The
+only loader-level prevention that KEEPS MOK is an OWN Kicksecure shim (option (c)
+in the key-ownership section): a shim whose `VENDOR_CERT` is the Kicksecure key,
+chainloading a Kicksecure-signed UKI (Debian's stock kernel+initrd bundled by
+`ukify`, signed once) over a dm-verity root. Because the shim trusts only the
+Kicksecure cert, stock Debian-signed GRUB is rejected -- the evil-initrd path is
+cut -- and MOK keeps working for DKMS/out-of-tree modules (MOK is shim-inherent).
 
-Loader-level PREVENTION is a bigger step and does NOT come from keeping Debian's
-shim: because Debian's shim embeds the Debian CA, re-signing or dual-signing it
-still trusts Debian-signed GRUB (the evil-initrd path stays open). Prevention
-requires either (c) an OWN shim carrying the owner's own `VENDOR_CERT` -- keeps
-MOK and cuts the path, the real but larger project -- or (d) full Sovereign Boot
-(own `db` keys, MS AND Debian CAs revoked, own UKIs) which prevents but drops
-shim and therefore MOK (forcing the kernel-rebuild route for out-of-tree modules,
-off the table per keep-MOK). Near-term: Anchor 1 detection, with own-shim (c) as
-the prevention project. See the key-ownership section.
+Deliver it both ways, from the same Kicksecure-signed artifacts:
+- **MS-signed own shim via shim-review** -- prevention that ALSO boots out-of-box
+  on stock Microsoft-key machines. Precedent exists for small Debian derivatives
+  (Lernstick). Cost: an upstream-based reproducible build, HSM key custody, a
+  verified security contact, and the recurring SBAT/CVE re-review-and-re-sign
+  treadmill.
+- **Sovereign own-key (Dasharo/3mdeb wizard)** -- the owner enrolls Kicksecure's
+  PK/KEK/db (MS, and for full sovereignty Debian's CA, into `dbx`); the same
+  Kicksecure-signed shim/UKI then boots natively, no Microsoft -- maximal owner
+  control, at the cost of out-of-box compatibility.
 
-Do NOT rely on loader choice (GRUB vs systemd-boot) for confinement -- neither
-provides it while Debian/MS keys are trusted. An own-signed GRUB +
-`check_signatures` closes only the GRUB layer; it is still bypassed by swapping
-in Debian's signed GRUB (which Debian's shim trusts via its embedded CA), so it
-prevents only combined with an own shim or with Debian's CA in `dbx`.
+Layer DETECTION on top as defense-in-depth, NOT as the goal: measured boot +
+TPM-sealed FDE. Seal the FDE key to PCR 7 (+11), not the volatile 8/9, via a
+signed `pcrlock` prediction, and keep an offline recovery key. (A surviving
+passphrase keyslot stays capturable, so sealing withholds the auto-unlock secret
+and aids attestation but does not itself prevent -- prevention comes from the
+own-shim chain above.)
+
+Do NOT rely on loader choice (GRUB vs systemd-boot) or on any Debian-DERIVED shim
+for confinement: Debian's shim embeds the Debian CA, so re-signing/dual-signing
+it still trusts Debian-signed GRUB (evil-initrd path open), and an own-signed
+GRUB + `check_signatures` is likewise bypassed by swapping in Debian's GRUB.
+Prevention requires the OWN shim (own `VENDOR_CERT`), full stop.
 
 Start IMA at measurement-only (`ima_policy=tcb` + Keylime); defer appraisal+EVM,
 or a local-hash dpkg hook, to a frozen-appliance scope until Debian gains
 package-level file signing.
 
+Sources: rhboot/shim-review https://github.com/rhboot/shim-review (Lernstick + small-derivative precedent) ; Dasharo/3mdeb Sovereign Boot wizard https://docs.dasharo.com/projects/sovereign-boot-wizard/ ; shim SBAT lifecycle https://sources.debian.org/src/shim/16.1-1/SBAT.md ; MS UEFI CA 2023 (post-2026-06-27 signing) https://lwn.net/Articles/1079808/
+
 
 ## Open product decisions
 
-- **Detection by default vs how far to push prevention.** Anchor 1 (measured
-  boot + TPM-sealing, keeps MS-shim compat) is the near-term default. Prevention
-  needs owning the shim: an OWN shim with the owner's `VENDOR_CERT` keeps MOK and
-  cuts the evil-initrd path; full Sovereign Boot (own `db`, MS AND Debian CAs in
-  `dbx`, drop shim) also prevents but loses MOK. Recommended: Anchor 1 default,
-  own-shim as the prevention project. (Three earlier drafts -- "stock GRUB -> UKI",
-  "systemd-boot confines boot", and "re-signed/dual-signed Debian shim gives
-  prevention" -- were all withdrawn: no loader confines boot, and no
-  Debian-derived shim prevents, while Debian/MS keys are trusted.)
+- **How to deliver prevention (the goal), not whether.** Prevention needs an OWN
+  Kicksecure shim (own `VENDOR_CERT`) + Kicksecure-signed UKI over dm-verity,
+  keeping MOK. The open choice is the delivery mix: MS-signed own shim via
+  shim-review (out-of-box, but the SBAT/CVE re-sign treadmill) and/or Sovereign
+  own-key enrollment (no MS, owner takes ownership). Recommended: pursue both --
+  shim-review for stock machines, the Dasharo/3mdeb wizard for sovereign owners --
+  from one set of Kicksecure-signed artifacts, with measured boot + TPM-sealed FDE
+  as defense-in-depth. (Three earlier drafts -- "stock GRUB -> UKI", "systemd-boot
+  confines boot", and "re-signed/dual-signed Debian shim prevents" -- were all
+  withdrawn: no Debian-derived shim prevents.)
 - **Rollback: keep the single backup copy, or move to A/B verity slots?**
   (A/B recommended.)
 - **IMA appraisal: ever, or measurement-only indefinitely?** Gated on Debian's

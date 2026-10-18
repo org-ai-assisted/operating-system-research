@@ -599,6 +599,23 @@ targets:
      method, NOT in the manual, and we have NOT yet run this recipe end to end
      (there is no appliance `.img` built yet). Label it expected-not-tested until
      verified.
+   - USB boot under BIOS firmware (workaround): the USB path above is EFI-ONLY.
+     If a VM must run the BIOS firmware and still USB-boot, the options, best
+     first: (a) just enable EFI (the first-line answer -- the restriction is
+     VBox-BIOS-only); (b) use QEMU instead of VirtualBox -- its default SeaBIOS
+     firmware (Free Software, Debian `seabios`) boots USB natively, no shim;
+     (c) if it must be VBox BIOS, boot a GRUB2 (BIOS) rescue ISO from the
+     virtual DVD and `insmod ehci uhci ohci usbms` then chainload the USB disk
+     -- Free Software (`grub-pc-bin`) but BEST-EFFORT and KNOWN-FLAKY (GRUB's
+     native USB stack conflicts with the BIOS hand-off; hangs are common,
+     EHCI/USB-2 historically worst). PLoP Boot Manager is the classic
+     convenient shim here BUT is proprietary freeware (no source, no-sale
+     license, abandoned since 2013, not in Debian) -- so under the
+     Free-Software-only policy it is at most an unofficial DEVELOPER test
+     convenience, never shipped or recommended to users. iPXE and SYSLINUX
+     MEMDISK do NOT help (no USB host-controller drivers); writing a bespoke
+     real-mode USB boot manager is a person-years systems project (reuse
+     GRUB2/SeaBIOS), not a worthwhile build.
 3. The `.img` as a plain virtual HARD DISK (WORST for installer testing): attach
    the same flat-VMDK descriptor to SATA (no convertfromraw), or
    `VBoxManage convertfromraw image.img image.vdi` (copies data). It boots under

@@ -328,7 +328,14 @@ input in a confidential VM.
 SMBIOS Type 11 and appends it to the cmdline (measured into PCR 12). It is ENABLED
 BY DEFAULT in every UKI -- there is no opt-in -- and the ONLY guard is
 `is_confidential_vm()` (a compiled CPUID + SEV-MSR / TDX check in
-`src/boot/vmm.c`). Kicksecure's derivative-maker has the GRUB equivalent, but
+`src/boot/vmm.c`). (A UKI's entry point is systemd-stub, NOT the kernel: the stub
+is signed, shim/db-validated EFI code that runs BEFORE the kernel starts -- it
+reads the SMBIOS/addons, makes the `is_confidential_vm()` decision, measures the
+final cmdline into PCR 12, and only THEN loads the embedded `.linux` kernel via
+`LoadImage`/`StartImage`, passing the assembled cmdline. So this is not "the kernel
+reading SMBIOS late"; it is trusted pre-kernel code deciding what the kernel will
+ever see -- precisely what an unsigned `grub.cfg` cannot be.) Kicksecure's
+derivative-maker has the GRUB equivalent, but
 inverted: an OPT-IN (default-OFF), dangerous-gated reader (the `--smbios-reader`
 build flag) whose `/etc/grub.d/01_smbios-reader` snippet reads the QEMU SMBIOS
 Type 1 serial `dm-cmdline=...` into `${dm_smbios_extra}` and appends it (via
@@ -355,9 +362,10 @@ not detect a CVM.)
 **Can GRUB honor is_confidential_vm? -- the blocker.** Research result (as of
 2026-10): there is NO GRUB `is_confidential_vm` primitive, NO savannah bug, and NO
 grub-devel patch that gates behavior on running in a confidential VM -- a clear
-NEGATIVE. The nearest items are a measured-boot gap (savannah #65821, "missing
-measurements on Intel TDX"; status not primary-verified -- savannah serves an
-anti-scraper page to automated clients), GRUB SEV launch-secret / LUKS work, and --
+NEGATIVE. The nearest items are a measured-boot gap (savannah #65821 "Missing measurements
+on confidential computing platforms (Intel TDX)", status Open -- the `tpm` module
+is not loaded on TDX guests so no boot measurements happen; a MISSING-measurement
+bug, NOT CVM-gating), GRUB SEV launch-secret / LUKS work, and --
 most tellingly -- Fedora's FESCo-approved "Light GRUB for Confidential Computing,"
 which has GRUB chainload a UKI rather than add any CVM logic to GRUB. Technically a
 signed `grub.cfg` cannot robustly detect a CVM: `cpuid` exposes only long-mode/PAE
@@ -380,7 +388,7 @@ authenticated only by `check_signatures`/signed `core.img` and otherwise merely
 MEASURED into PCR 8; CVE-2020-10713 "BootHole", Debian #906124 -- is exactly what
 that single signed-and-measured image closes.)
 
-Sources: systemd-stub (SMBIOS reader) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; systemd stub.c https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; cvm-lockdown issue #27604 https://github.com/systemd/systemd/issues/27604 and PR #28301 https://github.com/systemd/systemd/pull/28301 ; cloud-init NoCloud (DMI/SMBIOS seed) https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html ; QEMU fw_cfg https://www.qemu.org/docs/master/specs/fw_cfg.html ; Kicksecure derivative-maker --smbios-reader: packages/kicksecure/vm-config-dist/etc/grub.d/01_smbios-reader, etc/default/grub.d/99_smbios-cmdline.cfg, iso-build-data/grub-config/smbios-reader.cfg (repo Kicksecure/derivative-maker) ; GRUB smbios command (manual source, docs/grub.texi @node smbios -- retrieves a field into a --set variable; VERIFIED) https://git.savannah.gnu.org/cgit/grub.git/plain/docs/grub.texi ; GRUB cpuid.c (long-mode/PAE only) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/cpuid.c ; GRUB rdmsr.c https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/rdmsr.c ; GRUB savannah bug tracker https://savannah.gnu.org/bugs/?group=grub (bug #65821 measured-boot/TDX, status not primary-verified) ; Fedora Light GRUB for Confidential Computing https://fedoraproject.org/wiki/Changes/Grub2LightForConfidentialComputing and FESCo #3626 https://forge.fedoraproject.org/fesco/tickets/issues/3626 ; GRUB SEV launch-secret thread https://mail.gnu.org/archive/html/grub-devel/2021-02/msg00117.html ; CVE-2020-10713 BootHole https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 https://bugs.debian.org/906124
+Sources: systemd-stub (SMBIOS reader) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; systemd stub.c https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; cvm-lockdown issue #27604 https://github.com/systemd/systemd/issues/27604 and PR #28301 https://github.com/systemd/systemd/pull/28301 ; cloud-init NoCloud (DMI/SMBIOS seed) https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html ; QEMU fw_cfg https://www.qemu.org/docs/master/specs/fw_cfg.html ; Kicksecure derivative-maker --smbios-reader: packages/kicksecure/vm-config-dist/etc/grub.d/01_smbios-reader, etc/default/grub.d/99_smbios-cmdline.cfg, iso-build-data/grub-config/smbios-reader.cfg (repo Kicksecure/derivative-maker) ; GRUB smbios command (manual source, docs/grub.texi @node smbios -- retrieves a field into a --set variable; VERIFIED) https://git.savannah.gnu.org/cgit/grub.git/plain/docs/grub.texi ; GRUB cpuid.c (long-mode/PAE only) https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/cpuid.c ; GRUB rdmsr.c https://git.savannah.gnu.org/cgit/grub.git/tree/grub-core/commands/i386/rdmsr.c ; GRUB savannah bug #65821 "Missing measurements on confidential computing platforms (Intel TDX)", status Open https://savannah.gnu.org/bugs/?65821 (verified via Wayback snapshot https://web.archive.org/web/20250915012100/http://savannah.gnu.org/bugs/?65821 ) ; Fedora Light GRUB for Confidential Computing https://fedoraproject.org/wiki/Changes/Grub2LightForConfidentialComputing and FESCo #3626 https://forge.fedoraproject.org/fesco/tickets/issues/3626 ; GRUB SEV launch-secret thread https://mail.gnu.org/archive/html/grub-devel/2021-02/msg00117.html ; CVE-2020-10713 BootHole https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 https://bugs.debian.org/906124
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 

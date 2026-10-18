@@ -322,8 +322,25 @@ security-relevant. These are upstream systemd mechanisms -- Debian ships
 tooling (and an own trusted key) is Kicksecure's to provide. (Credential addons
 `<uki>.efi.extra.d/*.cred` exist too, but carry data, not cmdline.)
 
+GRUB has NO counterpart to the SMBIOS channel, so the confidential-VM guard above
+has no GRUB analogue: GRUB never ingests SMBIOS/DMI/`fw_cfg` OEM strings as kernel
+arguments (its `smbios` command only sets a shell variable on explicit request --
+it is not wired to the boot cmdline), so there is nothing for it to refuse in a
+confidential VM. GRUB's analogous gap is the broader one this note returns to
+throughout: its kernel cmdline comes from an UNSIGNED `grub.cfg`/`grubenv` (and the
+interactive `e` editor) on host-controlled storage, authenticated only by
+`check_signatures=enforce` or by baking the config into the signed `core.img`, and
+otherwise merely MEASURED into PCR 8 (the `tpm` module logs each `kernel_cmdline:`
+string). That unsigned-config family -- CVE-2020-10713 "BootHole" (Red Hat:
+grub.cfg parsing bypasses Secure Boot), Debian bug #906124 (the
+`check_signatures`/`pgp` regression and its own SB-bypass hazard) -- is exactly
+what the UKI's single signed-and-measured image is meant to close. So the
+GRUB-world answer to "change the cmdline safely" is the own-GRUB design (own key in
+`core.img` + `check_signatures` over a signed `grub.cfg`), not a signed-addon
+mechanism.
 
-Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee
+
+Sources: systemd-stub (addons, SMBIOS, cmdline override) https://www.freedesktop.org/software/systemd/man/latest/systemd-stub.html ; ukify (--cmdline, addon mode, signing) https://www.freedesktop.org/software/systemd/man/latest/ukify.html ; kernel-install cmdline sources https://www.freedesktop.org/software/systemd/man/latest/kernel-install.html ; loader.conf editor https://www.freedesktop.org/software/systemd/man/latest/loader.conf.html ; UKI spec (addons) https://uapi-group.org/specifications/specs/unified_kernel_image/ ; systemd stub.c (SMBIOS/cmdline gating, verified) https://github.com/systemd/systemd/blob/main/src/boot/stub.c ; systemd vmm.c (is_confidential_vm, CPUID/SEV-MSR detection) https://github.com/systemd/systemd/blob/main/src/boot/vmm.c ; commit adding the confidential-VM SMBIOS guard https://github.com/systemd/systemd/commit/4b1153cfcc397df5a095f2ec7e587787e8ba47ee ; GRUB has no SMBIOS->cmdline path (smbios command sets a variable only) ; CVE-2020-10713 BootHole (grub.cfg unauthenticated, Red Hat) https://access.redhat.com/security/vulnerabilities/grub2bootloader ; Debian bug #906124 (grub check_signatures/pgp) https://bugs.debian.org/906124
 
 ## Secure Boot key ownership: MS-shim compatibility and Sovereign Boot
 

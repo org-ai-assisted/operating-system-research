@@ -669,6 +669,62 @@ delivery artifact -- see "Testing in VirtualBox".
 | Main advantage | familiar flow, zero-step compression, safest installer test | a real normal persistent FDE install; normal `apt`/kernel upgrades | small + plain + persistent all at once | small + zero-step + persistent + boot integrity |
 | Main disadvantage | not persistent -- it is amnesic by nature | `.xz` step for raw-`dd`/VirtualBox users; larger than squashfs/XZ | slow, brittle first boot + bespoke code for a cosmetic gain | immutable root (no plain in-place `apt`); most complexity |
 
+### ISO vs drive-image: criteria from the EasyOS "ISO must die" debate
+
+EasyOS (Barry Kauler) dropped the ISO and ships only a raw drive-image `.img`,
+and argued the case at length. The criteria below are extracted from that page,
+Barry's two blog posts, the EasyOS install/update docs, and the OSNews + TinyCore
+forum debate (the primary Puppy forum thread was bot-blocked, so its points come
+via Barry's verbatim quotes and the independent OSNews thread). They apply to ISO
+vs ANY drive-image (our appliance `.img`, self-inflating, or verity-split are all
+"drive-image" here). Each is tagged: `fact` objective, `bk` EasyOS opinion, `cp`
+forum/OSNews counterpoint.
+
+| Criterion | ISO | Drive-image (`.img`) | Kind |
+|---|---|---|---|
+| Format lineage | ISO9660 (1988) + hybrid bolt-ons | native modern disk layout | fact + bk |
+| How it writes to USB | isohybrid is a dd-hack layered over iso9660 (bends the spec) | a real partitioned disk, dd'd natively | fact |
+| Geometry/size honesty | partition table misstates CHS/GPT size | same ambiguity -- not actually cleaner | cp |
+| USB write workflow | same tools + "boot from it" step | same tools + step | fact (neutral) |
+| Partition table | none -- one iso9660 filesystem on the whole device | real GPT: ESP + `/boot` + root | fact |
+| Space after writing | remainder is dead space | working partition auto-grows to fill the drive | fact |
+| Persistence out of the box | read-only; needs an overlay or extra partition | read-write; save area present at first boot | fact |
+| Can it persist at all | yes (Knoppix-style overlay / extra writable partition) | yes, natively | cp (ISO can too) |
+| Immutability | read-only by nature | writable | fact (cuts both ways) |
+| Kernel/initrd update | rebuild the whole ISO | replace `vmlinuz` / swap initrd+sfs in place, or normal `apt` | fact |
+| Edit files on the medium | no | yes (mount/click the `.img`) | fact |
+| BIOS + UEFI boot | isohybrid serves both via hybrid cruft | standard ESP, simple on both; single-stage menu | fact + bk |
+| dd-to-USB UEFI issues | can occur | avoided (native image) | cp (pro-image) |
+| Secure Boot / signing | EasyOS does not document it | EasyOS does not document it -- OUR doc covers it (see Known limitation) | gap |
+| Download form | `.iso` | `.img.gz`/`.img.xz` (decompress, or xz-aware flasher) | fact |
+| Download size head-to-head | not published anywhere | not published anywhere | gap |
+| Flashing-tool ecosystem | huge (Rufus, Etcher, Ventoy, YUMI, Unetbootin) | easydd / USB Image Tool; Ventoy also writes `.img` | cp (ISO breadth) |
+| Re-verify vs published hash | yes, any time (read-only) | no -- it mutates on first boot (rekey/grow) | cp (pro-ISO) |
+| Write verification | format-independent (easydd checksums after write) | same | fact (neutral) |
+| VM import | boots from the virtual DVD directly | often needs `.img` -> VDI/VMDK conversion | cp/fact (pro-ISO) |
+| VM drive-mapping | predictable (DVD is not a disk) | as a disk it can confuse primary vs secondary | cp (pro-ISO) |
+| Multiboot managers | native ISO ecosystem | Ventoy supports `.img`; smaller ecosystem | cp (pro-ISO) |
+| Remote/BMC virtual media (IPMI/iDRAC/iLO) | mounts an ISO -- the sysadmin standard | a raw `.img` is generally not a BMC media type | cp (pro-ISO, strong) |
+| PXE / netinst | strong ecosystem | weaker for a raw image | cp (pro-ISO) |
+| Optical / non-USB-bootable legacy PCs | CD-R still works | needs USB-boot or a frugal install | cp (pro-ISO, marginal) |
+| Read-only clean environment (banking/forensics) | tamper-resistant | writable | cp (pro-ISO) |
+| At-rest encryption | n/a (read-only) | fscrypt/LUKS on the working partition | fact (pro-image) |
+| Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | bk (pro-image) |
+| Cost of shipping BOTH | an ISO build is cheap and well-trodden | -- | cp (dropping ISO is motivation, not a tech blocker) |
+| Standards / anti-fragmentation / user choice | proven cross-platform standard | newer, less universal | cp (pro-ISO) |
+
+Synthesis: EasyOS's pro-image criteria (real partition table, out-of-the-box
+persistence, grow-to-fill, in-place kernel/initrd edits, simpler BIOS+UEFI, at-rest
+encryption, one maintenance model) reinforce the appliance `.img` as the
+persistent artifact. But the forum/OSNews counterpoints (BMC/IPMI virtual-media,
+PXE, multiboot-manager reach, VM drive-mapping, re-verifiability against a
+published hash, read-only as a clean-environment security property, and the low
+cost of just shipping an ISO too) are precisely the reasons to KEEP the ISO for
+the install/try path rather than drop it -- i.e. the debate supports shipping
+BOTH, not replacing one with the other. Two gaps no source settles: Secure Boot
+handling (EasyOS silent; our doc addresses it) and a quantified ISO-vs-image size
+comparison.
+
 
 ## Open questions / scoping
 

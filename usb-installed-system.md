@@ -676,6 +676,21 @@ targets:
      testable on the headless server, but VBox presented the gadget to the guest
      as an ordinary xHCI USB MSC, which EFI enumerates independently of the host
      backing, so the limitation is very likely VBox EFI itself.
+   - Can we plug a DIFFERENT EFI firmware in? Possible but no help. VBox loads its
+     EFI from a swappable `.fd` (`VBoxInternal/Devices/efi/0/Config/EfiRom`
+     extradata; 7.x ships `VBoxEFI-amd64.fd` as a file), but stock OVMF won't fix
+     this: VBox's firmware already LOADS `UsbBusDxe`/`UsbMassStorageDxe` (so the
+     mass-storage driver is NOT the gap), and upstream OVMF is tied to QEMU's
+     platform (fw_cfg etc.) and won't even boot on VBox. Third-party reports
+     (Unraid/Haiku/OpenWrt) say VBox EFI boots USB via EHCI (USB 2.0) but not xHCI
+     (USB 3.0) -- so we re-tested the gadget with ONLY OHCI+EHCI (xHCI off): same
+     result -- captured and attached, but EFI's Boot Manager and File Explorer
+     stayed empty. So neither EHCI nor xHCI enumerated it here. (Confound: a
+     dummy_hcd gadget plus VBox's late USB capture is not a physical stick present
+     before power-on, which is what those reports used; untestable on a headless
+     server.) Net: USB boot of the `.img` is not achievable in VBox by any route
+     tested here -- use the SATA flat-VMDK (3), or QEMU (`-device usb-storage,
+     bootindex=0` + real OVMF) if USB-boot realism is actually needed.
    - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
      not USB-boot even under EFI, above): for an old machine whose BIOS cannot
      USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --

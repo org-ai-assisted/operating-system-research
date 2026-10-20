@@ -660,6 +660,22 @@ targets:
      on SATA). The manual's "USB-attached drives boot under EFI" line apparently
      means physical USB passthrough (rawdisk), not a disk on the usb storage
      controller; no on-point bugtracker ticket documents it.
+   - Can we EMULATE physical USB passthrough so EFI boots it? TESTED, no. We
+     built a removable USB mass-storage gadget on the host backed by the `.img`
+     (Linux `dummy_hcd` virtual UDC + `g_mass_storage file=... removable=1`, both
+     stock modules on the Debian/Kicksecure kernel) and captured it into the VM
+     via a VBox USB device filter. VBox DID capture and attach it (guest showed
+     "Currently attached USB devices: 0525:a4a5 ... Linux File-backed Storage
+     Gadget" on xHCI) -- yet EFI STILL showed an empty Boot Manager and empty
+     File Explorer and "No bootable option or device was found". So VBox 7.2.20
+     EFI does not enumerate/boot a USB mass-storage device even when genuinely
+     passed through, not only on the usb storage controller. (This is NOT a
+     licensing limit: USB 2.0/3.0 passthrough is in the Free base package since
+     VBox 7.0.0 -- no Extension Pack -- so the "needs the proprietary Ext Pack"
+     claim is stale 6.0 docs.) Residual caveat: a real physical stick was not
+     testable on the headless server, but VBox presented the gadget to the guest
+     as an ordinary xHCI USB MSC, which EFI enumerates independently of the host
+     backing, so the limitation is very likely VBox EFI itself.
    - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
      not USB-boot even under EFI, above): for an old machine whose BIOS cannot
      USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --

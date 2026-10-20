@@ -678,10 +678,25 @@ targets:
      backing, so the limitation is very likely VBox EFI itself.
    - Can we plug a DIFFERENT EFI firmware in? Possible but no help. VBox loads its
      EFI from a swappable `.fd` (`VBoxInternal/Devices/efi/0/Config/EfiRom`
-     extradata; 7.x ships `VBoxEFI-amd64.fd` as a file), but stock OVMF won't fix
-     this: VBox's firmware already LOADS `UsbBusDxe`/`UsbMassStorageDxe` (so the
-     mass-storage driver is NOT the gap), and upstream OVMF is tied to QEMU's
-     platform (fw_cfg etc.) and won't even boot on VBox. Third-party reports
+     extradata; 7.x ships `VBoxEFI-amd64.fd` as a file), but a replacement firmware
+     does not fix this -- and VBox will not even accept one. TESTED (VBox 7.2.20):
+     the `EfiRom` slot is NOT a generic edk2 loader. Its parser (`DevEFI.cpp`
+     `efiParseFirmware()`) rejects any image that is not VBox's own firmware-volume
+     layout, at PARSE time, before any platform init could run:
+       - Dasharo `coreboot+UEFI` qemu_q35 ROM (8 MiB) -> assert at `DevEFI.cpp:1194`
+         (FV header signature `_FVH` absent; a coreboot flash image is not an edk2
+         FV at all) -> VM aborts to poweroff.
+       - Dasharo edk2 OVMF (its OvmfPkg fork; "Dasharo Sovereign Boot" is a mode
+         WITHIN Dasharo builds, not a separate artifact -- the only loadable-shaped
+         file is this OVMF `.fd`), CODE-only (3.65 MiB) -> assert at `DevEFI.cpp:1215`
+         (FV filesystem GUID is not VBox's NvData FV GUID) -> VM aborts.
+       - Same OVMF as a combined VARS+CODE 4 MiB image -> VBox maps ONLY the leading
+         528 KB varstore FV, never the code FV; firmware reaches no display output
+         (screenshot 0x0) -> stuck.
+     So only VBox's own `VBoxEFI-amd64.fd` passes the parser. Independently, VBox's
+     own firmware already LOADS `UsbBusDxe`/`UsbMassStorageDxe` (so the mass-storage
+     driver is NOT the gap), and upstream/Dasharo OVMF is tied to QEMU's platform
+     (fw_cfg etc.) so it would not boot on VBox even if it parsed. Third-party reports
      (Unraid/Haiku/OpenWrt) say VBox EFI boots USB via EHCI (USB 2.0) but not xHCI
      (USB 3.0) -- so we re-tested the gadget with ONLY OHCI+EHCI (xHCI off): same
      result -- captured and attached, but EFI's Boot Manager and File Explorer

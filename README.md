@@ -8,6 +8,14 @@ citations) solve it, judges the options, and records the decision.
 
 ## Index
 
+- [dasharo-virtualbox-port.md](dasharo-virtualbox-port.md) -- can real Dasharo
+  (coreboot + `DasharoPayloadPkg`) firmware run inside VirtualBox? Finds that
+  Dasharo is a coreboot distribution (not an OVMF variant), that VirtualBox's EFI
+  slot parses only OVMF-shaped flash and rejects a flat `coreboot.rom`, and records
+  the minimal ring-3 `DevEFI` loader change that makes coreboot boot and drive
+  VirtualBox's chipset (proven), plus the clean next step toward a first-class
+  `emulation/qemu-vbox` coreboot board. Code: `org-ai-assisted/virtualbox` and
+  `org-ai-assisted/dasharo`.
 - [live-usb-persistence.md](live-usb-persistence.md) -- how to provide
   persistent storage (and full-disk encryption) on a live USB the system
   booted from. Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`,

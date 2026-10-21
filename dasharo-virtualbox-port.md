@@ -111,19 +111,24 @@ its own tables, and reaches `Jumping to boot code`. ACPI is functional, not mere
 off: VirtualBox relocates its PM decode from coreboot's `PMBA` write so the FADT and
 ports line up, and a real guest shutdown (`SLP_TYP=5` with `SLP_EN`) still powers off.
 
-**Gap 2 -- UEFI payload bring-up -- open.** With gap 1 fixed, coreboot hands off, but
-no payload reaches a shell yet, for VBox-vs-QEMU platform-model differences:
-`DasharoPayloadPkg` asserts in early PEI -- `CpuTimerLib` reads CPUID leaf `0x15`
-(unimplemented on VBox's CPU; fix `-D CPU_TIMER_LIB_ENABLE=FALSE`), then `AcpiTimerLib`
-finds no ACPI-board-info HOB (the coreboot->payload ACPI-RSDP hand-off that works in
-QEMU fails here); upstream `UefiPayloadPkg` instead loads a segment into the
-640 KiB--1 MiB legacy hole that coreboot's VBox memory map marks reserved (`lzma
-Decoding error`). Both are the QEMU-board's assumptions about QEMU's memory map and
-ACPI hand-off -- the dedicated board below is the clean fix.
+**Gap 2 -- UEFI payload to an interactive shell -- SOLVED.** With gap 1 fixed, a real
+coreboot `UefiPayloadPkg` (the classic build, MrChromebox fork) boots all the way to an
+**interactive UEFI shell** inside the patched VirtualBox, ACPI functional, and `reset
+-s` at the prompt powers the VM off via a clean ACPI S5. Getting there meant closing a
+chain of VBox-vs-QEMU/real-hardware differences, each with a one-line fix: the payload's
+48-bit identity-map page-table build wedges (VBox passes 48-bit width and masks 1 GiB
+pages) -> report 36 physical address bits via `--cpuid-set 0x80000008`; `HpetTimerDxe`
+asserts (no HPET) -> `--hpet on`; VBox's HPET never delivers its interrupt -> build with
+the LAPIC timer (`CONFIG_EDK2_USE_LAPIC_TIMER`); a `#GP` in `PciHostBridgeDxe` from an
+entryless MCFG (i440fx has no ECAM, no `fw_cfg` to read QEMU's) -> a one-guard coreboot
+`acpi_create_mcfg` fix to not emit it; then RELEASE + `EDK2_SERIAL_SUPPORT` for the shell
+on COM1. The full recipe + proof log are in `org-ai-assisted/dasharo`.
 
-So the enabling VirtualBox change is proven (it runs real coreboot firmware with
-functional ACPI), and a real Dasharo payload builds, integrates, and hands off; the
-remaining work is the dedicated board in the next section.
+So the enabling VirtualBox change is proven end to end: it runs real coreboot firmware
+with functional ACPI, through a full UEFI payload to an interactive shell. The remaining
+polish is the Dasharo payload specifically (its PEI ACPI-board-info HOB ordering) and
+folding the five VM/build tweaks into a dedicated coreboot board so a stock VM needs no
+per-VM flags -- the next section.
 
 The full serial captures are in `org-ai-assisted/dasharo` under `proof/`
 (`coreboot-on-vbox-serial.log`, `dasharo-payloadpkg-vbox-serial.log`,

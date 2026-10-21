@@ -16,12 +16,12 @@ citations) solve it, judges the options, and records the decision.
   VirtualBox's chipset (proven), plus the clean next step toward a first-class
   `emulation/qemu-vbox` coreboot board. Code: `org-ai-assisted/virtualbox` and
   `org-ai-assisted/dasharo`.
-- [live-usb-persistence.md](live-usb-persistence.md) -- how to provide
-  persistent storage (and full-disk encryption) on a live USB the system
-  booted from. Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`,
-  Ubuntu casper/mkusb, Ventoy, and dracut `dmsquash-live`; records the shift
-  from a live-overlay model to a pre-installed appliance-image model for
-  Kicksecure/Whonix.
+- [usb-installed-system.md](usb-installed-system.md) -- how to provide
+  whole-root persistence (and full-disk encryption) on a USB you boot from.
+  Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`, Ubuntu
+  casper/mkusb, and dracut `dmsquash-live`; weighs a live-overlay model against
+  a pre-installed appliance-image model for Kicksecure/Whonix (a normal install
+  on a USB, not a live USB), leaning toward the appliance -- nothing decided yet.
 - [verified-measured-ima-boot.md](verified-measured-ima-boot.md) -- verified,
   measured, and IMA boot for a Debian base (live ISO and installed) to a
   PREVENTION (Sovereign/Secure Boot) standard, keeping MOK and BIOS. Surveys

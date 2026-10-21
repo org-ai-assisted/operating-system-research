@@ -1,13 +1,25 @@
-# Persistent storage on a booted live USB
+# Persistent storage on a bootable USB
 
-How do you give a live USB persistent storage -- ideally whole-root
-persistence with full-disk encryption -- on the SAME medium the system
-booted from? This note surveys how the major projects solve it, identifies
-the one constraint that rules out the naive approach, and records the design
-chosen for Kicksecure/Whonix.
+How do you give a USB you boot from whole-root persistence -- ideally with
+full-disk encryption -- on the SAME medium the system booted from? This note
+surveys how the major projects solve it, identifies the one constraint that
+rules out the naive approach, and weighs the delivery options for
+Kicksecure/Whonix. NOTHING is decided yet -- this records the leading candidate
+and the tradeoffs, not a final choice.
+
+A naming note up front: "persistent live USB" is a contradiction in terms. A
+LIVE system is amnesic by design -- it runs from read-only media and discards
+state at shutdown -- so it cannot also be persistent. The survey below shows
+every genuine live-overlay route is either blocked (the whole-disk iso9660
+constraint) or a bolt-on, and the leading (appliance) design resolves the
+contradiction by dropping "live" entirely: it ships a normal, persistent install
+on the USB and
+lets `grub-live` provide amnesic-on-demand as an opt-in mode. So this is a
+bootable/installed USB system, NOT a live USB -- which is why this note is named
+`usb-installed-system`, not "live-usb-persistence".
 
 Scope: Kicksecure/Whonix use dracut `dmsquash-live` with an overlayfs union
-root. The findings generalize, but the decision at the end is specific to
+root. The findings generalize, but the leaning at the end is specific to
 that stack.
 
 
@@ -34,6 +46,9 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   the flashing/boot tool read xz natively (balenaEtcher and Raspberry Pi Imager
   do; `dd` and `VBoxManage convertfromraw` do not), `.img.xz` would satisfy G6
   and G7 at once.
+- G8 -- Simple partition design: as few partitions as possible, standard layout,
+  no dedicated/auxiliary partitions (e.g. no separate LUKS-header partition). A
+  detached-header FDE scheme is rejected on this ground (see the FDE fork).
 
 ### The conflicts
 
@@ -63,7 +78,7 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
   and immutable; it can be neither a writable persistent root nor a writable
   LUKS FDE root. squashfs-as-root is the same live-vs-persistent contradiction
   restated at the filesystem layer.
-  - Resolution already chosen (see Compression below): compress the DOWNLOAD
+  - Resolution proposed (see Compression below): compress the DOWNLOAD
     (`.img.xz` + `.bmap`, decompressed on the fly while flashing / before
     `convertfromraw`), run on a read-WRITE btrfs/f2fs `compress=zstd` root --
     compressed and persistent, larger than squashfs/XZ but far smaller than raw
@@ -111,7 +126,7 @@ cannot all hold on one artifact; the conflicts are the point of listing them.
 
 Net: the "read-only medium" goals (G5 ISO-on-DVD, G6 squashfs-root) and the
 zero-extra-step usability goal (G7) are mutually exclusive with the
-plain-normal-persistent-FDE-install appliance in the Decision below, UNLESS the
+plain-normal-persistent-FDE-install appliance candidate below, UNLESS the
 design moves to the verity-split-root model, which reconciles them but is not a
 plain install.
 
@@ -309,7 +324,7 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
    it for raw-dd.
 
 6. Appliance model -- ship a pre-installed normal disk image. See below. This
-   is the chosen direction.
+   is the current front-runner (nothing is decided yet).
 
 7. Self-inflating squashfs `.img` -- ship a PLAIN `.img` (dd-compatible, no
    outer `.xz`) that is small because its rootfs is a squashfs INSIDE the image;
@@ -321,16 +336,16 @@ Source: dracut-ng `modules.d/70dmsquash-live/dmsquash-live-root.sh`,
    squashfs" below.
 
 
-## Decision for Kicksecure/Whonix: the appliance model
+## Leading candidate (not yet decided): the appliance model
 
-Requirements that shaped the choice: whole-root persistence that behaves like
+Requirements that shape the leaning toward it: whole-root persistence that behaves like
 a normal install; full-disk encryption (not just `/home`) available, with the
 encrypt-or-not decision left to the user as an explicit first-boot CHOICE (not
 silently defaulted on or off); a second disk as an option; and -- a late
 reframing -- amnesic boot is NOT required as the default, because `grub-live`
 already provides amnesic-on-demand from the GRUB menu on any installed system.
 
-Given that, the live-overlay models (3, 4) are the wrong frame. The chosen
+Given that, the live-overlay models (3, 4) are the wrong frame. The appliance
 design ships a PRE-INSTALLED normal Kicksecure disk image (`.img`, the same
 kind of partitioned install dracut/Debian produce for VM images), flashed to
 the USB. It boots as a genuinely normal persistent install; `grub-live`
@@ -355,23 +370,30 @@ Why this is better for these requirements:
 
 ### Layout
 
-- ESP + plaintext `/boot` + LUKS2/Argon2id root.
+- ESP + plaintext `/boot` + LUKS2/Argon2id root. For legacy-BIOS boot the image
+  also needs MBR boot code + a BIOS boot partition (`bios_grub`/`EF02`); an ESP
+  alone is UEFI-only.
 - Generic initramfs (`hostonly=no`) so the USB boots on any machine.
-- `systemd-repart` with `GrowFileSystem=` grows root to fill the USB on first
-  boot -- the modern cloud/appliance-image idiom (this is what systemd-repart
-  is actually for, versus the earlier, unworkable idea of carving an overlay
-  into a live ISO).
+- `systemd-repart` grows the root PARTITION to fill the USB on first boot -- the
+  modern cloud/appliance-image idiom. Growing the FILESYSTEM inside it is a
+  separate step: the `GrowFileSystem=` flag is honored only by gpt-auto
+  (Discoverable Partitions) mounts, NOT by explicit `fstab`/`crypttab` mounts, so
+  an explicit-mount Debian layout needs a `systemd-growfs`/`resize2fs` step --
+  and `cryptsetup resize` first for the LUKS mapping.
 
 ### Compression: not a regression
 
 A plain ext4 install would lose the squashfs/XZ compression the ISO had. The
 fix is a compressing read-write root:
 
-- btrfs with `compress=zstd` -- the Fedora Workstation / openSUSE default root
-  fs -- gives transparent per-file zstd on a fully read-write filesystem.
-  Composes with the stack: disk -> LUKS -> btrfs(zstd), compression before
-  encryption; `grub-live`'s RAM overlay is fs-agnostic.
-- f2fs with `compress_algorithm=zstd` -- same idea, flash-optimized.
+- btrfs with `compress=zstd` -- the Fedora Workstation default root fs (btrfs
+  `compress=zstd:1` since Fedora 34; openSUSE uses btrfs but does NOT enable
+  compression by default) -- gives transparent per-file zstd on a fully
+  read-write filesystem. Composes with the stack: disk -> LUKS -> btrfs(zstd),
+  compression before encryption; `grub-live`'s RAM overlay is fs-agnostic.
+- f2fs with `compress_algorithm=zstd` -- same idea, flash-optimized, but f2fs
+  compresses only files flagged for it (`chattr +c`, or a `compress_extension=`
+  mount option; `compress_extension=*` for all), not every file automatically.
 
 btrfs-zstd does not match squashfs-XZ's ratio (XZ read-only large-block is
 more aggressive), so the running footprint is larger than the squashfs image
@@ -404,10 +426,11 @@ ones that decompress xz WHILE writing to the device (no manual `xz -d`):
   unpacked by hand, per the still-open request). IN Debian:
   `gnome-disk-utility` (trixie 46.1, bookworm 43.0).
   https://gitlab.gnome.org/GNOME/gnome-disk-utility/-/issues/342
-- bmaptool -- CLI; decompresses xz/gz/bz2/zst/lz4/lzo on the fly, with OR
-  without a `.bmap` (`bmaptool copy image.img.xz /dev/sdX`; `--nobmap` for a
-  plain decompress-and-write, no bmap acceleration). This is effectively the
-  "dd that understands xz." IN Debian: `bmap-tools` (bookworm 3.6-2); in trixie
+- bmaptool -- CLI; decompresses xz/gz/bz2/zst/lz4/lzo on the fly. It uses a
+  `.bmap` beside the image if present; with NO `.bmap` the bare `bmaptool copy`
+  ERRORS ("bmap file not found, use --nobmap") and writes nothing, so you must
+  pass `--nobmap` (`bmaptool copy --nobmap image.img.xz /dev/sdX`) to flash
+  without bmap acceleration. This is effectively the "dd that understands xz." IN Debian: `bmap-tools` (bookworm 3.6-2); in trixie
   `bmap-tools` is a transitional package and the binary moved to the renamed
   `bmaptool` 3.9.0-3 (command is `bmaptool` either way).
   https://manpages.debian.org/trixie/bmaptool/bmaptool.1.en.html
@@ -434,9 +457,10 @@ https://docs.oracle.com/en/virtualization/virtualbox/6.0/user/vboxmanage-convert
 The idea: ship a PLAIN `.img` (no outer `.xz`, dd-compatible) that is small
 because its rootfs is a squashfs stored INSIDE the image; on first boot, unpack
 the squashfs onto a plain read-write root, delete the squashfs, and grow root to
-fill the device. On paper it satisfies G1 + G2 + G5 + G6 + G7 together, which
-nothing else does. In practice it is viable but carries real cost, and -- a
-strong signal -- no mainstream project actually ships it.
+fill the device. On paper it satisfies G1 + G2 + G6 + G7 together, which nothing
+else does (not G5 -- a plain `.img` is not the ISO-on-DVD familiar flow; that
+stays the "middle" VBox path). In practice it is viable but carries real cost,
+and -- a strong signal -- no mainstream project actually ships it.
 
 - NO PRIOR ART for the exact pattern (a squashfs unpacked IN PLACE to a plain rw
   root on one self-inflating medium, squashfs then discarded). The closest are
@@ -456,8 +480,13 @@ strong signal -- no mainstream project actually ships it.
   `CopyBlocks=`, partclone). You hand-roll and maintain a bespoke dracut module
   or first-boot service. systemd-repart only grows/adds partitions (never
   shrinks/moves/deletes outside factory-reset), so the squashfs must live in a
-  TRAILING partition: inflate root, delete the trailing squashfs partition, grow
-  root into the reclaimed space.
+  TRAILING partition and the ordering is awkward: the root partition has to be
+  shipped already large enough to hold the inflated tree (you cannot grow root
+  into the trailing space until the squashfs is deleted, yet you need the
+  squashfs present to inflate FROM) -- so it is inflate into a pre-sized root,
+  then delete the trailing squashfs partition, then grow to fill the rest. That
+  "ship root pre-sized to the full inflated size" requirement fights the
+  small-image goal and is part of why this is brittle.
 - FIRST-BOOT TIME is paid on the user's (often weak) device, not once on a build
   host. Estimate for ~2 GB compressed -> ~6-8 GB root: NVMe/SATA-SSD with zstd
   ~15-60 s; a good USB 3.0 stick ~2-4 min; a cheap USB 3.0 stick ~5-10 min. On
@@ -497,24 +526,35 @@ per-user FDE, asymmetric because of how cryptsetup works:
   root you are booted from -- so run it from the initramfs/live environment, not
   the running root.
 
-Per G2 the first boot PRESENTS the encrypt-or-not choice either way; A and B
-differ only in the shipped starting state and therefore in which direction is
-the fast path (keyslot change) versus the slow one (full reencryption).
+Per G2 the first boot PRESENTS the encrypt-or-not choice either way. A and B
+differ in the shipped starting state (A ships encrypted under a public default
+key; B ships plaintext), but BOTH need a first-boot `reencrypt` to reach real
+per-user confidentiality -- A to rotate off the public master key, B to encrypt
+the plaintext -- so the earlier "A is the fast keyslot path" framing does not hold.
 
-Option A (recommended) -- ship the root already inside LUKS2 with a
-known/default keyslot that the initramfs unlocks automatically; FORCE the user
-to set their own passphrase at first boot (a fast, online `luksAddKey` +
-`luksRemoveKey` of the default). The data is LUKS-formatted from the first byte
-and first boot is fast -- but this is NOT confidentiality yet: the default key
-ships inside every image (on the unencrypted `/boot`/initramfs), so anyone with
-the image can open the volume and tamper with the root until `luksRemoveKey`
-runs, and a user who only ADDS a passphrase (no offline re-encrypt) then seals
-any pre-existing tampering under their own key. The honest guarantee of A is
-"encrypted at rest against a party WITHOUT the shipped key" plus a fast first
-boot; real confidentiality begins only once the default key is removed, and the
-pre-rekey tampering window closes only with a re-encrypt or an integrity-verified
-root. "Keep unencrypted" stays available as an explicit opt-out that runs the
-slow offline `reencrypt --decrypt`.
+Option A -- ship the root already inside LUKS2 with a known/default keyslot the
+initramfs unlocks automatically, then convert at first boot. The subtlety that
+sinks the naive version: `luksAddKey`/`luksRemoveKey` change only KEYSLOTS, never
+the master (volume) key. That master key is baked at build time and is PUBLIC --
+anyone with the image recovers it by unlocking the shipped header with the
+default passphrase -- so removing the default keyslot does NOT make the volume
+confidential: the data stays decryptable with the public master key (directly via
+`cryptsetup open --master-key-file`, or by restoring the shipped header), and a
+user who merely ADDS a passphrase writes all later data under that same public
+key. Real confidentiality requires ROTATING the master key, which only
+`cryptsetup reencrypt` does -- a first-boot full `reencrypt` with a fresh volume
+key, not a keyslot swap. Done before user data and before the grow (on the small
+pre-grow image) it is bounded (minutes) and crash-resumable. To avoid the
+destructive `--reduce-device-size` datashift, build the image with the ~16-32 MiB
+LUKS2 header gap PRE-RESERVED at the front of the root partition -- this keeps the
+standard integrated-header layout (`luksOpen /dev/root`, `crypttab` and recovery
+work with no `header=` plumbing) and only de-risks the shift (it moves into
+reserved empty space). A detached header would avoid the datashift entirely but
+needs a dedicated header partition, which conflicts with the simple-partition
+goal (G8), so the pre-reserved integrated gap is the choice here. Prior art:
+SUSE's `disk-encryption-tool` does a first-boot in-place `reencrypt --encrypt` on
+its Micro appliance images. "Keep unencrypted" stays an explicit opt-out
+(`reencrypt --decrypt`).
 
 Disadvantage of A (encrypted by default), weighed against G2's "simple to
 mount with standard commands": the shipped image is a PARTITIONED disk image, so
@@ -559,6 +599,14 @@ Calamares from the ISO, separate from this feature.
 
 ### Testing in VirtualBox
 
+Note on "no `convertfromraw`": a flat-VMDK descriptor is a ~300-byte TEXT sidecar
+whose extent line is `RW <sectors> FLAT "image.raw" 0` -- it references the raw
+`.img` IN PLACE (the raw bytes are the storage), so it is NOT a conversion and
+copies nothing. `convertfromraw`, by contrast, writes a whole new VDI/VMDK with
+the data copied. VBox will not attach a completely bare `.img` as a disk, so the
+descriptor is the minimal zero-copy glue; booting through it IS booting the raw
+image. (QEMU needs no glue at all: `-drive file=image.img,format=raw`.)
+
 Three ways to test, from least to most confusable about which disk the installer
 targets:
 
@@ -566,10 +614,10 @@ targets:
    read-only optical device; Calamares cannot offer it as a destination, so the
    wrong-target mistake is impossible. This is the installer/try path (the ISO
    artifact), not the persistent `.img`.
-2. The `.img` as a virtual USB/removable device (MIDDLE -- mirrors a physical
-   USB-boot + install-to-internal-disk, and the removable medium is still
-   distinguishable from the fixed target). Possible in VirtualBox 7.x WITHOUT
-   `convertfromraw`, but EFI-ONLY:
+2. The `.img` as a virtual USB/removable device -- TESTED, does NOT work in
+   VirtualBox 7.2.20. The intent (mirror a physical USB-boot, and keep the
+   removable medium distinguishable from the fixed Calamares target) rested on
+   the 7.x manual's "USB-attached drives boot under EFI". We ran it:
    - VirtualBox 7.x has a real USB storage controller; each disk attached to it
      "appears as a dedicated USB device to the guest." But: "Booting from drives
      attached using USB is only supported when EFI is used as the BIOS lacks USB
@@ -593,26 +641,217 @@ targets:
      fixed internal disk. (`--hotpluggable`/`--nonrotational` only set hot-plug
      and SSD hints -- they do NOT make a non-USB-controller disk removable; only
      attaching to the USB controller does.)
-   - CONFIDENCE: the USB controller, the EFI-only USB-boot restriction, and the
-     RawDrive-is-physical-only facts are verbatim from the official 7.x manual.
-     The flat-VMDK-descriptor-for-a-file technique is a well-known community
-     method, NOT in the manual, and we have NOT yet run this recipe end to end
-     (there is no appliance `.img` built yet). Label it expected-not-tested until
-     verified.
-3. The `.img` as a plain virtual HARD DISK (WORST for installer testing): attach
-   the same flat-VMDK descriptor to SATA (no convertfromraw), or
-   `VBoxManage convertfromraw image.img image.vdi` (copies data). It boots under
-   BIOS or EFI, but presents as a FIXED disk indistinguishable from the target,
-   inviting a wrong-target pick in Calamares.
+   - RESULT (TESTED, VBox 7.2.20, USB storage controller + `--usbxhci on`): the
+     VM powered on but the EFI firmware enumerated ONLY the blank SATA disk and
+     printed "No bootable option or device was found" -- it did NOT boot the
+     USB-attached disk. We then entered the firmware by hand to rule out "just not
+     auto-discovered": the EFI Boot Manager listed only the two PXE entries (no
+     disk), and Boot Maintenance Manager -> Boot From File opened an EMPTY File
+     Explorer (no filesystem at all). So the firmware does not enumerate a
+     USB-storage-controller disk as a boot device OR a filesystem -- there is no
+     manual-selection or persisted-entry path either. The IDENTICAL flat-VMDK on
+     a SATA controller booted Kicksecure fully (see 3) and uses the same ESP, so
+     this is a USB-path limitation, not an image problem. The manual's
+     USB-boot-under-EFI claim did not hold in 7.2.20: treat VBox USB-device boot
+     as NON-WORKING (use the SATA flat-VMDK in 3 instead). Corroborated by a VBox
+     forum moderator (forums.virtualbox.org thread t=87303): "Neither the BIOS nor
+     the EFI implementations allow for a USB controller based disk to boot" (same
+     setup -- a disk on the usb storage controller, invisible to EFI, booting fine
+     on SATA). The manual's "USB-attached drives boot under EFI" line apparently
+     means physical USB passthrough (rawdisk), not a disk on the usb storage
+     controller; no on-point bugtracker ticket documents it.
+   - Can we EMULATE physical USB passthrough so EFI boots it? TESTED, no. We
+     built a removable USB mass-storage gadget on the host backed by the `.img`
+     (Linux `dummy_hcd` virtual UDC + `g_mass_storage file=... removable=1`, both
+     stock modules on the Debian/Kicksecure kernel) and captured it into the VM
+     via a VBox USB device filter. VBox DID capture and attach it (guest showed
+     "Currently attached USB devices: 0525:a4a5 ... Linux File-backed Storage
+     Gadget" on xHCI) -- yet EFI STILL showed an empty Boot Manager and empty
+     File Explorer and "No bootable option or device was found". So VBox 7.2.20
+     EFI does not enumerate/boot a USB mass-storage device even when genuinely
+     passed through, not only on the usb storage controller. (This is NOT a
+     licensing limit: USB 2.0/3.0 passthrough is in the Free base package since
+     VBox 7.0.0 -- no Extension Pack -- so the "needs the proprietary Ext Pack"
+     claim is stale 6.0 docs.) Residual caveat: a real physical stick was not
+     testable on the headless server, but VBox presented the gadget to the guest
+     as an ordinary xHCI USB MSC, which EFI enumerates independently of the host
+     backing, so the limitation is very likely VBox EFI itself.
+   - Can we plug a DIFFERENT EFI firmware in? Not as a prebuilt drop-in, but the
+     firmware IS rebuildable. VBox loads its EFI from a swappable `.fd`
+     (`VBoxInternal/Devices/efi/0/Config/EfiRom` extradata; 7.x ships
+     `VBoxEFI-amd64.fd`). The `EfiRom` parser (`DevEFI.cpp` `efiParseFirmware()`)
+     requires a COMBINED, varstore-first OVMF-layout image: the first FV must be the
+     STANDARD edk2 varstore (`EFI_SYSTEM_NV_DATA_FV_GUID`,
+     FFF12B8D-7696-4C8B-A985-2747075B4F50 -- NOT a VBox-proprietary GUID), with a
+     valid `_FVH` header, page-aligned, `<=` the ROM size. TESTED (VBox 7.2.20) with
+     Dasharo's artifacts:
+       - coreboot `qemu_q35` ROM (8 MiB) -> assert `DevEFI.cpp:1194` (no `_FVH`
+         header; a coreboot flash image is not an edk2 FV) -> VM aborts.
+       - a SPLIT `OVMF_CODE.fd` (3.65 MiB; leads with `FVMAIN_COMPACT`, a firmware-FS
+         GUID, not the varstore) -> assert `DevEFI.cpp:1215` (first-FV GUID != the
+         varstore GUID) -> VM aborts.
+       - a correctly COMBINED 4 MiB image (`cat OVMF_VARS OVMF_CODE`) PARSES -- VBox
+         registers the varstore FV -- but does NOT boot: the code is built for QEMU's
+         platform (fw_cfg etc.), so it never reaches display output (0x0).
+     So a prebuilt FOREIGN firmware will not boot. BUT VBox's own firmware is just
+     stock `OvmfPkgX64` built from the OSE source (`src/VBox/Devices/EFI/Firmware/`)
+     with `!ifdef $(VBOX)` patches -- modern edk2 (~edk2-stable202502), Secure Boot +
+     authenticated variables ON by default. So a CUSTOM VBox firmware (e.g. one
+     carrying extra edk2 modules) can be built from that tree and loaded via
+     `EfiRom`. (This is the basis for a feasible Dasharo Sovereign Boot VBox port,
+     tracked separately; note VBox builds Secure Boot WITHOUT `SMM_REQUIRE`, so the
+     varstore is not SMM-isolated -- a caveat for a user-owned verified-boot threat
+     model, though fine for a test/demo firmware.) None of this changes USB boot:
+     VBox's firmware already LOADS `UsbBusDxe`/`UsbMassStorageDxe` (mass-storage
+     driver is NOT the gap), and the USB-enumeration gap is in VBox's EFI/xHCI path,
+     unaffected by swapping firmware. Third-party reports
+     (Unraid/Haiku/OpenWrt) say VBox EFI boots USB via EHCI (USB 2.0) but not xHCI
+     (USB 3.0) -- so we re-tested the gadget with ONLY OHCI+EHCI (xHCI off): same
+     result -- captured and attached, but EFI's Boot Manager and File Explorer
+     stayed empty. So neither EHCI nor xHCI enumerated it here. (Confound: a
+     dummy_hcd gadget plus VBox's late USB capture is not a physical stick present
+     before power-on, which is what those reports used; untestable on a headless
+     server.) Net: USB boot of the `.img` is not achievable in VBox by any route
+     tested here -- use the SATA flat-VMDK (3), or QEMU (`-device usb-storage,
+     bootindex=0` + real OVMF) if USB-boot realism is actually needed.
+   - BIOS USB-boot workaround (for REAL hardware / QEMU -- NOT VBox, which did
+     not USB-boot even under EFI, above): for an old machine whose BIOS cannot
+     USB-boot, best first: (a) enable UEFI; (b) use QEMU instead of VirtualBox --
+     its default SeaBIOS
+     firmware (Free Software, Debian `seabios`) boots USB natively, no shim;
+     (c) if it must be VBox BIOS, boot a GRUB2 (BIOS) rescue ISO from the
+     virtual DVD and `insmod ehci uhci ohci usbms` then chainload the USB disk
+     -- Free Software (`grub-pc-bin`) but BEST-EFFORT and KNOWN-FLAKY (GRUB's
+     native USB stack conflicts with the BIOS hand-off; hangs are common,
+     EHCI/USB-2 historically worst). PLoP Boot Manager is the classic
+     convenient shim here BUT is proprietary freeware (no source, no-sale
+     license, abandoned since 2013, not in Debian) -- so under the
+     Free-Software-only policy it is at most an unofficial DEVELOPER test
+     convenience, never shipped or recommended to users. iPXE and SYSLINUX
+     MEMDISK do NOT help (no USB host-controller drivers); writing a bespoke
+     real-mode USB boot manager is a person-years systems project (reuse
+     GRUB2/SeaBIOS), not a worthwhile build.
+3. The `.img` as a plain virtual HARD DISK (flat-VMDK on SATA) -- TESTED, WORKS
+   under BOTH EFI and BIOS, with NO `convertfromraw`. Attach the same flat-extent
+   VMDK descriptor to a SATA controller (`storageattach ... --type hdd --medium
+   image.vmdk`); the raw `.img` is referenced in place, no data copy. Verified: a
+   100 GiB Kicksecure-LXQt raw (GPT: ESP + `bios_grub` + root) booted to the LXQt
+   desktop under `--firmware efi` AND `--firmware bios`. This is the working
+   no-convert way to test the appliance `.img` in VBox. Downside (unchanged): it
+   presents as a FIXED disk, indistinguishable from a blank target in Calamares,
+   so the ISO-on-DVD path (1) stays safest for installer testing; the
+   removable-USB distinguishability idea (2) is not achievable in VBox.
 
 For the persistent appliance `.img` itself (booting it as a normal install, no
-installer), any of the three attaches it; the USB or plain-disk route is fine.
+installer), the SATA flat-VMDK route (3) is the working attach -- no
+`convertfromraw`, boots under EFI or BIOS. The USB-device route (2) did not boot
+in VBox.
 
 ### Artifacts
 
-- Ship the pre-installed `.img` (`.img.xz` + `.bmap`) for the persistent USB.
-- Keep the ISO for live/try/installer use, at minimal effort (candidate for
-  later deprecation).
+Candidate artifacts (nothing decided):
+
+- a pre-installed `.img` (`.img.xz` + `.bmap`) for the persistent USB;
+- the ISO retained for live/try/installer use (candidate for later deprecation).
+
+
+## Artifact comparison
+
+The delivery artifacts considered, against the goals (G1-G7) and the properties
+that decide between them. "choice" = first boot asks the user (G2). VM-test
+formats (qcow2 / VMDK / OVA) are a separate testing convenience, not a user
+delivery artifact -- see "Testing in VirtualBox".
+
+Legend (GitHub-rendered emoji; the source stays ASCII shortcodes):
+:white_check_mark: yes / strong, :x: no / absent, :warning: caveat / partial,
+:heavy_minus_sign: not applicable.
+
+| Feature | ISO (live + installer) | Appliance `.img.xz` | Self-inflating squashfs `.img` | Verity-split-root `.img` |
+|---|---|---|---|---|
+| Role | live/try + Calamares installer source | pre-installed normal persistent system on the USB | plain `.img` with a squashfs inside that inflates to a rw root on first boot | read-only compressed `/usr` + writable LUKS state |
+| Whole-root persistence (G1) | :x: no (amnesic; persists only after installing to a SEPARATE disk) | :white_check_mark: yes (a real install) | :white_check_mark: yes (after the first-boot inflate) | :warning: state persists, but the root is immutable (not a normal-install package model) |
+| Root FDE, default=choice (G2) | :warning: only via the Calamares install-to-disk, not on the ISO | :white_check_mark: yes, whole-root LUKS; encrypt-or-not is a first-boot choice | :white_check_mark: yes (inflate into a LUKS container) | :warning: writable state is LUKS; `/usr` is public (verity integrity, not encrypted) |
+| Download size (G6) | :white_check_mark: small (squashfs/XZ inside) | :warning: medium (btrfs/f2fs-zstd at rest, then `.xz`); bigger than squashfs/XZ | :white_check_mark: small (squashfs inside, no outer wrapper) | :white_check_mark: small (squashfs/erofs `/usr`) |
+| Outer wrapper / decompress step (G7) | :white_check_mark: none -- boots and flashes compressed, zero step | :warning: `.xz` wrapper; zero-step only on xz-aware flashers, else a manual `xz -d` | :white_check_mark: none (plain dd-able `.img`, zero step) | :white_check_mark: can ship as a plain `.img` (compressed at rest), zero step |
+| dd / flasher compatibility | :white_check_mark: dd-able isohybrid; DVD-burnable | :warning: xz-aware flashers write `.img.xz` inline (zero-step); plain `dd` needs `xz -d` first | :white_check_mark: dd-able | :white_check_mark: dd-able |
+| Familiar VBox test (G5) | :white_check_mark: BEST -- attach to the virtual DVD and boot | :warning: middle -- attach as a virtual USB (EFI) or hard disk | :warning: middle -- as USB/HDD | :warning: middle -- one image can back BOTH an ISO and a disk |
+| Calamares wrong-target safety | :white_check_mark: BEST -- read-only DVD source can never be the target | :heavy_minus_sign: n/a (no installer; boots directly) | :heavy_minus_sign: n/a (no installer) | :heavy_minus_sign: n/a (no installer) |
+| Boot medium / rootfs | read-only whole-disk iso9660 + squashfs | writable GPT disk; btrfs/f2fs(zstd) root, plaintext `/boot`, LUKS root | writable disk; squashfs staging -> rw root | writable disk; dm-verity read-only `/usr` + writable state |
+| Kernel upgrades | :warning: n/a while live; normal once installed | :white_check_mark: normal (new kernel lands in `/boot`, GRUB reads it) | :white_check_mark: normal (after inflate) | :warning: image-based (A/B or reseal), NOT plain apt-in-place |
+| Amnesic | :white_check_mark: yes, by default | :white_check_mark: on demand via `grub-live` | :white_check_mark: on demand via `grub-live` | :white_check_mark: on demand via `grub-live`; also the ISO (writes -> tmpfs) |
+| First-boot cost | :white_check_mark: none | :white_check_mark: fast (rekey + grow) | :warning: SLOW (unsquashfs: ~15-60 s on SSD, ~2-10 min on USB) | :white_check_mark: fast (grow) |
+| Tooling maturity / new code | :white_check_mark: mature (exists today) | :warning: standard install layout + systemd-repart; modest new build tooling | :x: bespoke dracut/first-boot module; no prior art; brittle (power-loss mid-inflate) | :warning: more complex (verity/UKI/sealing); integrity bonus |
+| Main advantage | familiar flow, zero-step compression, safest installer test | a real normal persistent FDE install; normal `apt`/kernel upgrades | small + plain + persistent all at once | small + zero-step + persistent + boot integrity |
+| Main disadvantage | not persistent -- it is amnesic by nature | `.xz` step for raw-`dd`/VirtualBox users; larger than squashfs/XZ | slow, brittle first boot + bespoke code for a cosmetic gain | immutable root (no plain in-place `apt`); most complexity |
+
+### ISO vs drive-image: delivery-format criteria
+
+The criteria below weigh an ISO against ANY raw drive-image (our appliance
+`.img`, self-inflating, and verity-split are all "drive-image" here). Each is
+tagged: `fact` objective, `opinion` a maintainer/advocate view, `cp` a
+counterpoint, `gap` an unresolved/unpublished question. Drawn from a survey of
+the ISO-vs-drive-image debate.
+
+| Criterion | ISO | Drive-image (`.img`) | Kind |
+|---|---|---|---|
+| Format lineage | ISO9660 (1988) + hybrid bolt-ons | native modern disk layout | fact + opinion |
+| How it writes to USB | isohybrid is a dd-hack layered over iso9660 (bends the spec) | a real partitioned disk, dd'd natively | fact |
+| Geometry/size honesty | partition table misstates CHS/GPT size | same ambiguity -- not actually cleaner | cp |
+| USB write workflow | same tools + "boot from it" step | same tools + step | fact (neutral) |
+| Partition table | a hybrid MBR/GPT IS present, but the iso9660 fs spans the whole device (not confined to a partition) | real GPT: ESP + `/boot` + root | fact |
+| Space after writing | remainder is dead space | working partition grows to fill the drive (via a first-boot grow step, not automatically) | fact |
+| Persistence out of the box | read-only; needs an overlay or extra partition | read-write; save area present at first boot | fact |
+| Can it persist at all | yes (Knoppix-style overlay / extra writable partition) | yes, natively | cp (ISO can too) |
+| Immutability | read-only by nature | writable | fact (cuts both ways) |
+| Kernel/initrd update | rebuild the whole ISO | replace `vmlinuz` / swap initrd+sfs in place, or normal `apt` | fact |
+| Edit files on the medium | no | yes (mount/click the `.img`) | fact |
+| BIOS + UEFI boot | isohybrid serves both via hybrid cruft | ESP for UEFI; legacy BIOS needs MBR code + a `bios_grub` partition; single-stage menu | fact + opinion |
+| dd-to-USB UEFI issues | can occur | avoided (native image) | cp (pro-image) |
+| Secure Boot / signing | the surveyed sources are silent | silent -- OUR doc covers it (see Known limitation) | gap |
+| Download form | `.iso` | `.img.gz`/`.img.xz` (decompress, or xz-aware flasher) | fact |
+| Download size head-to-head | not published anywhere | not published anywhere | gap |
+| Flashing-tool ecosystem | huge (many mainstream flashers + multiboot tools) | fewer image writers; some multiboot tools also write `.img` | cp (ISO breadth) |
+| Re-verify vs published hash | yes, any time (read-only) | no -- it mutates on first boot (rekey/grow) | cp (pro-ISO) |
+| Write verification | format-independent (the writer can checksum after write) | same | fact (neutral) |
+| VM import | boots from the virtual DVD directly | often needs `.img` -> VDI/VMDK conversion | cp/fact (pro-ISO) |
+| VM drive-mapping | predictable (DVD is not a disk) | as a disk it can confuse primary vs secondary | cp (pro-ISO) |
+| Multiboot managers | native ISO ecosystem | multiboot managers can boot `.img` too; smaller ecosystem | cp (pro-ISO) |
+| Remote/BMC virtual media (IPMI/iDRAC/iLO) | mounts an ISO -- the sysadmin standard | a raw `.img` is generally not a BMC media type | cp (pro-ISO, strong) |
+| PXE / netinst | strong ecosystem | weaker for a raw image | cp (pro-ISO) |
+| Optical / non-USB-bootable legacy PCs | CD-R still works | needs USB-boot or a frugal install | cp (pro-ISO, marginal) |
+| Read-only clean environment (banking/forensics) | tamper-resistant | writable | cp (pro-ISO) |
+| At-rest encryption | n/a (read-only) | fscrypt/LUKS on the working partition | fact (pro-image) |
+| Producer maintenance | live-CD caveats pervade the docs | one coherent persistent model | opinion (pro-image) |
+| Cost of shipping BOTH | an ISO build is cheap and well-trodden | -- | cp (dropping ISO is motivation, not a tech blocker) |
+| Standards / anti-fragmentation / user choice | proven cross-platform standard | newer, less universal | cp (pro-ISO) |
+| Host-OS inspect/mount of the container | Windows natively mounts/burns ISO | multi-partition `.img`/`.sfs` not easily opened on Windows (click-opens on Linux) | cp (pro-ISO) |
+| Drive-image vs rootfs-image | -- | a PARTITIONED drive-image click-opens (N partitions); the "opaque/nested" gripe is about ROOTFS-images, not this | fact (clarifies pro-image) |
+| Direct-file-boot (multiboot managers) | boots ISO | ALSO boots `.img`/VHD in practice -- not ISO-exclusive | fact (neutral) |
+| ...but needs build-time support | initrd search code + loopback.conf baked by the creator | same -- a build-time choice, not a free container property | fact (neutral) |
+| Frugal-install INSTALLER ecosystem | existing frugal-install + Windows dual-boot installers consume ISO | migrating them to `.img` = re-coding; also covers install-to-internal-drive + Win dual-boot | cp (pro-ISO, migration cost) |
+| Multi-distro coexistence on one stick | many distros as frugal installs on one boot menu | `.img` wants the whole stick; reclaim/add is manual | cp (pro-ISO) |
+| dd invocation footgun | burn/GUI tools hide it | exact `dd` command error-prone for newbies; they want a GUI installer | cp (pro-ISO) |
+| Secure Boot cert copy fidelity | most ISO->USB tools OMIT the distro `.cer` (only a few keep it) | a writable image can carry it | cp (concrete SB-gap datapoint) |
+| `.img.gz` loop-mount on tiny storage | ISO/SFS loop-mount as shipped | cannot mount a `.gz` without first writing the full uncompressed `.img`; a fix: a tiny ~8 MB 2nd partition so compressed ~= uncompressed, then ship an UNCOMPRESSED `.img` | fact + pro-image resolution |
+| VM: QEMU vs VirtualBox | universal virtual optical drive | QEMU boots a raw `.img` directly (`-hda`, no convert); VirtualBox needs a VDI/VMDK wrapper | fact (QEMU easy, VBox friction) |
+| Size-ceiling as anti-bloat discipline | CD/DVD ceiling nudges smaller builds | no inherent ceiling | opinion (pro-ISO, marginal) |
+| Optical disc as archival hard-copy | durable physical recovery fallback | -- | opinion (pro-ISO; discs degrade, drives vanishing) |
+| VM-trial / adoption barrier | easy VM trial via the virtual DVD | dropping ISO entirely blocks easy VM trial -> adoption/UX cost | opinion (pro-ISO) |
+| Installed-base / network-effect inertia | the format the "many" already use | newer; must overcome inertia | opinion (pro-ISO) |
+| Net direction | retain for install/try, VM, BMC/PXE, re-verifiable-hash, read-only use | leads for the PERSISTENT artifact (real install, whole-root FDE, normal upgrades); the two are complementary, not either/or | net |
+
+Third-way formats also considered (neither a plain ISO nor a whole-disk `.img`):
+
+- a single `.sfs` (kernel+initrd+sfs) -- easy to build (mksquashfs) and inspect,
+  but no Windows host tooling;
+- a ZIP / self-extracting `.exe` / tar -- extract-to-target = a frugal install
+  (ZIP loses Unix ownership/permissions; tar keeps them);
+- QCOW2 -- built-in encryption, dynamic grow, snapshots, native to QEMU;
+- a tiny cross-platform download-script that fetches vmlinuz/initrd/sfs and adds
+  a boot entry (no formatting, no image);
+- a hybrid-ISO with an appended writable partition (keeps the ISO and gains
+  persistence);
+- an `img`<->`iso` converter so no producer is forced to ship both.
 
 
 ## Open questions / scoping

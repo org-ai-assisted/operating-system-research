@@ -90,9 +90,32 @@ i440fx/PIIX3 chipset QEMU does, so upstream coreboot's QEMU board runs directly;
 one visible difference is that VirtualBox has no QEMU `fw_cfg` interface, so coreboot
 takes its documented CMOS fallback for RAM sizing ("QEMU: firmware config interface
 not found / Falling back to RAM info in CMOS"). With `PAYLOAD_NONE` coreboot stops
-after device enumeration; a payload would boot on from there.
+after device enumeration.
 
-The full serial capture is in `org-ai-assisted/dasharo` under `proof/`.
+A real `DasharoPayloadPkg` UEFI payload was then built from `Dasharo/edk2`
+(`-D BOOTLOADER=COREBOOT -D TPM_ENABLE=FALSE -D SECURE_BOOT_ENABLE=FALSE`) and
+integrated into the 4 MiB ROM via `cbfstool add-payload` (the 14.8 MiB FV LZMA-packs
+to ~910 KiB; load `0x800000`, entry `0x800860`). It does not yet reach a UEFI shell
+inside VirtualBox, and the reason splits into two concrete, separately-reproduced
+gaps:
+
+- VirtualBox-side: coreboot's `emulation/qemu-i440fx` expects QEMU's PIIX4 ACPI
+  function at `00:01.3` (`[8086/7113]`) and `fw_cfg`, neither of which VirtualBox
+  emulates. Ramstage logs `PCI: Static device PCI: 00:00:01.3 not found` and then
+  trips an early ACPI S5 power-down -- before the payload is loaded. So *no* payload
+  reaches handoff inside VirtualBox on the vanilla QEMU board.
+- Payload-side: under QEMU (which has `fw_cfg` + PIIX4 ACPI) the identical ROM boots
+  coreboot to completion and the coreboot -> payload handoff is proven (`Jumping to
+  boot code at 0x00800860`), but `DasharoPayloadPkg` then resets immediately in early
+  PEI -- it targets real Dasharo boards, not vanilla `emulation/qemu-i440fx`.
+
+So the enabling VirtualBox change is fully proven (it runs real coreboot firmware),
+and a real Dasharo payload builds, integrates, and hands off; the remaining work is
+the chipset + payload-platform match in the next section.
+
+The full serial captures are in `org-ai-assisted/dasharo` under `proof/`
+(`coreboot-on-vbox-serial.log`, `dasharo-payloadpkg-vbox-serial.log`,
+`dasharo-payloadpkg-qemu-handoff.log`).
 
 ## What was rejected
 
@@ -112,11 +135,17 @@ per-mainboard model.
 dedicated board rather than reusing the QEMU board:
 
 1. A new coreboot mainboard `src/mainboard/emulation/qemu-vbox` (cloned from
-   `qemu-i440fx`/`q35`, adapted to VirtualBox's CMOS RAM sizing and info port, with no
-   `fw_cfg` dependency). coreboot's Bhyve support is the precedent for adding an
-   emulator board without `#ifdef`-ing shared code.
+   `qemu-i440fx`/`q35`, adapted to VirtualBox's CMOS RAM sizing and info port, no
+   `fw_cfg`, and not driving the absent PIIX4 ACPI at `00:01.3`) -- this closes the
+   VirtualBox-side gap above (the ramstage ACPI S5). coreboot's Bhyve support is the
+   precedent for adding an emulator board without `#ifdef`-ing shared code. The
+   alternative is to teach VirtualBox's `DevACPI` to expose a QEMU-compatible PIIX4
+   ACPI function + `fw_cfg`.
 2. The reused `DasharoPayloadPkg` as the coreboot payload, board-agnostic via the
-   coreboot table.
+   coreboot table. Closing the payload-side gap needs a DEBUG payload build
+   (`USE_CBMEM_FOR_CONSOLE=TRUE` or serial) to locate the early-PEI fault, then either
+   adapting `DasharoPayloadPkg` to the board or using upstream `UefiPayloadPkg` for the
+   emulated target.
 3. A Dasharo `configs/config.emulation_vbox` wiring the two together.
 
 That produces a genuine Dasharo firmware image for VirtualBox, loadable with the same

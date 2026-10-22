@@ -122,7 +122,7 @@ Notes on the two subtle rows:
   rather than the tiny isolated 10.0.2.x of NAT. That is additive exposure, not a
   collapse of anonymity.
 
-## Wi-Fi: bridged usually fails outright
+## When bridged networking breaks (Wi-Fi is one case of a family)
 
 On a Wi-Fi uplink, bridged is not merely "fragile" -- it typically does not work at
 all, which matters because laptops are the common Whonix host. The root cause is
@@ -146,13 +146,63 @@ wired interface" -- on macOS (AirPort) and Linux; Oracle Solaris has "no support
 using wireless interfaces" at all.
 
 KVM/libvirt bridge and macvtap have no such built-in rewrite, so bridging a guest over
-a Wi-Fi station interface generally does not work there either. The documented
-options are a MAC-rewriting ebtables hack, 4-address/WDS mode (only if the AP supports
-it), or -- the standard recommendation -- NAT.
+a Wi-Fi station interface generally does not work there either -- libvirt states
+"wireless interfaces cannot be attached to a Linux host bridge" and recommends NAT.
+The documented options are a MAC-rewriting ebtables hack, 4-address/WDS mode (only if
+the AP supports it), or -- the standard recommendation -- NAT.
 
-So on Wi-Fi the practical choice for a VM gateway is user-mode NAT; bridged is a
-wired-LAN option. This is a concrete, substantiated reliability reason for the NAT
-default, independent of the security arguments above.
+Wi-Fi is one instance of a broader pattern: bridged assumes the host's uplink is an
+Ethernet segment that will carry the guest's OWN MAC and IP, and many real
+environments violate that. When they do, bridged fails -- sometimes silently,
+sometimes taking the host's own link down with it -- and the near-universal fix is the
+same as for Wi-Fi: NAT/routed, so only the host's MAC/IP appears on the wire. Grouped
+by root cause:
+
+- **L2 "one MAC per port/association" rejection** (the same mechanism as Wi-Fi, on
+  wire). Switch **port security** (max-MAC / sticky-MAC): a second MAC past the limit
+  fires the violation action, and the default is to error-disable and SHUT the port --
+  taking the host's link down too (Cisco). **802.1X / NAC** single-host ports
+  authenticate one supplicant; the guest's unauthenticated MAC is dropped or
+  error-disables the port (the switch admin can permit it with multi-auth host-mode or
+  MAC Authentication Bypass). **DHCP snooping / Dynamic ARP Inspection / IP Source
+  Guard**: a guest MAC/IP absent from the snooping binding table is dropped -- a silent
+  per-frame drop rather than a port-down (Cisco). macvtap, "just a variation on an L2
+  bridge," fails over Wi-Fi for this same reason (libvirt maintainer).
+
+- **Non-bridgeable uplink medium.** A Linux bridge is an L2 Ethernet switch; a
+  point-to-point / L3 interface has no MAC and no Ethernet framing, so it cannot be a
+  bridge port: **PPPoE** (ppp0), **VPN tun** interfaces (OpenVPN: "TUN devices cannot
+  be used for bridges"; WireGuard is tun-only, so cannot be bridged at all), and
+  **cellular / mobile broadband** (ppp, or a QMI/MBIM raw-ip netdev that is
+  ARPHRD_NONE with no L2 header). Nuance: USB tethering that enumerates as Ethernet
+  (RNDIS, CDC-ECM/NCM) IS bridgeable; only ppp/raw-ip tethering is not. Route/NAT
+  instead.
+
+- **Virtual-switch / cloud anti-MAC-spoofing.** The hypervisor or cloud fabric admits
+  only the registered MAC/IP of the host vNIC, so a bridged guest's own MAC/IP is
+  dropped: **AWS EC2** source/destination check (must be disabled per ENI), **Azure**
+  (the MAC is fixed; off-NIC addresses need "IP forwarding" plus extra IP configs),
+  **GCP** anti-spoofing (needs canIpForward or alias IP ranges), **VMware
+  vSphere/ESXi** vSwitch "Forged Transmits" and "MAC Address Changes" (default Reject
+  since 7.0). Use secondary IPs/routing, or NAT out of the guest.
+
+- **Single-lease / one-MAC binding upstream.** ISPs that bind service to one
+  registered MAC (router vendors ship a "MAC clone" feature precisely for this), and
+  DOCSIS cable modems whose Max-CPE commonly defaults to 1 (extra CPE MACs are
+  dropped). A bridged guest either gets no lease or displaces the host; NAT hides it
+  behind the host's single MAC/lease.
+
+- **Mode isolation (a surprise, not a failure to reach the LAN).** macvtap / macvlan
+  in bridge mode let guests reach the LAN and each other but NOT the host directly, by
+  kernel design (Red Hat, Docker, LXD). And captive portals key on the client MAC/IP
+  (RFC 8952), so a bridged guest is a separate client that must authenticate on its
+  own.
+
+The through-line: NAT needs no cooperation from the uplink and works everywhere;
+bridged works only on a plain wired Ethernet segment whose switch, ISP, or cloud
+fabric tolerates a second MAC. For a single-host Whonix deployment that is a strong,
+substantiated reliability argument for the NAT default -- independent of the security
+arguments above.
 
 ## Is Whonix's "bridged is bad" substantiated, or historical?
 
@@ -216,6 +266,19 @@ physical LAN), not the default and not the ISN fix.
 - Proxmox WLAN wiki (why bridging over Wi-Fi fails; recommends against it) -- https://pve.proxmox.com/wiki/WLAN
 - FreeBSD bhyve: no guest network when bridged from a Wi-Fi interface -- https://forums.freebsd.org/threads/no-network-on-guest-when-bridged-from-wi-fi-interface.89148/
 - Ruckus KB: AP binds leased IP to the associated MAC (VM gets an IP but is dropped) -- https://support.ruckuswireless.com/answers/000004024
+- Debian wiki, BridgeNetworkConnections (APs reject frames from a non-associated source MAC) -- https://wiki.debian.org/BridgeNetworkConnections
+- libvirt Networking (wireless interfaces cannot be attached to a Linux host bridge) -- https://wiki.libvirt.org/Networking.html
+- Cisco, Port Security (violation -> error-disable / port shutdown) -- https://www.cisco.com/c/en/us/td/docs/Sanity_test/INC9625337/b_1710_sec_9300_cg1/m9_1710_sec_port_security_cg.html
+- Cisco, 802.1X single-host mode / multi-auth / MAB -- https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst3750/software/release/12-2_55_se/configuration/guide/scg3750/sw8021x.html
+- Cisco, Dynamic ARP Inspection / DHCP snooping / IP Source Guard -- https://www.cisco.com/c/en/us/support/docs/switches/lan-switch-software/222274-troubleshoot-dynamic-arp-inspection-dai.html
+- OpenVPN, Bridging vs Routing (TUN devices cannot be bridged) -- https://community.openvpn.net/openvpn/wiki/BridgingAndRouting
+- AWS EC2, source/destination check -- https://docs.aws.amazon.com/vpc/latest/userguide/work-with-nat-instances.html
+- Azure, network interface (fixed MAC; IP forwarding for off-NIC addresses) -- https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-network-interface
+- Google Cloud, alias IP ranges / anti-spoofing (canIpForward) -- https://docs.cloud.google.com/vpc/docs/alias-ip
+- VMware vSphere, Forged Transmits / MAC Address Changes (default Reject since 7.0) -- https://knowledge.broadcom.com/external/article/446719
+- ISP single-MAC binding + MAC-clone workaround (Keenetic) -- https://support.keenetic.com/hero/kn-1012/en/13772.html
+- Red Hat / libvirt, macvtap host-to-guest isolation -- https://wiki.libvirt.org/TroubleshootMacvtapHostFail.html
+- RFC 8952, Captive Portal Architecture (per-client MAC/IP) -- https://www.rfc-editor.org/rfc/rfc8952.html
 - passt -- https://passt.top/passt/about/
 - Whonix-Gateway Security (the bridged warning) -- https://www.whonix.org/wiki/Whonix-Gateway_Security
 - Whonix Troubleshooting (virtualizer settings / "breaks networking") -- https://www.whonix.org/wiki/Troubleshooting

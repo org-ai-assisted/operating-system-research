@@ -33,3 +33,15 @@ citations) solve it, judges the options, and records the decision.
   and/or Sovereign own-key) chainloading a Kicksecure-signed UKI (Debian
   kernel+initrd) over dm-verity, MOK preserved; measured boot + TPM-sealed FDE as
   defense-in-depth; IMA measurement-only.
+- [nat-vs-bridged-vm-networking.md](nat-vs-bridged-vm-networking.md) -- which VM
+  networking mode for a Whonix-Gateway. Separates the two families (user-mode
+  connection-terminating NAT -- VirtualBox NAT, KVM passt/SLIRP -- versus on-LAN
+  L2/L3 bridged/macvtap), with VirtualBox/libvirt/passt citations. Records the
+  empirical finding that user-mode NAT regenerates the TCP ISN (so in-VM `tirdad`
+  is bypassed; verified in network namespaces AND in a full Whonix-Gateway VM),
+  while L3 forwarding (a home router's NAPT, Qubes, bare metal) preserves it.
+  Fact-checks Whonix's "bridged is bad" stance against the `whonix-gateway-firewall`
+  source and finds it mainly historical/"untested" caution -- the anonymity model is
+  link-independent -- with one substantiated additive concern (local-LAN / MAC
+  exposure). Decision: keep NAT/passt, fix the ISN with host-side `tirdad`. Code:
+  `org-ai-assisted/dist-ai` `usr/share/tirdad-isn-nat-tests/`.

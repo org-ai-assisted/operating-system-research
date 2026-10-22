@@ -102,7 +102,7 @@ where the path forwards at L3 (Qubes-Whonix, bare-metal Kicksecure).
 | Local-LAN exposure / isolation | guest invisible + unreachable from the LAN; egress rebranded as the host | guest is an L2 citizen of the LAN -- own MAC+IP, reachable from and able to reach the router + other LAN hosts |
 | Leak containment (defense in depth) | a stray or uncovered packet is contained to the private NAT net; the gateway identity never touches the LAN | no containment: stray L2/IPv6-RA/NDP/DHCP/mDNS and the gateway MAC reach the real LAN |
 | Anonymity of traffic (exit IP) | Tor exit (firewall-enforced) | Tor exit -- SAME; the firewall is link-independent |
-| Configuration / reliability | self-contained; built-in DHCP; no host cooperation; works on Wi-Fi, captive, port-security nets | needs a host bridge + promiscuous mode, the LAN's DHCP, the host firewall not blocking it; Wi-Fi cannot cleanly bridge; breaks on port-security / captive portals |
+| Configuration / reliability | self-contained; built-in DHCP; no host cooperation; works on Wi-Fi, captive, port-security nets | needs a host bridge + promiscuous mode, the LAN's DHCP, the host firewall not blocking it; Wi-Fi: bridged generally FAILS (802.11 single-MAC, see below); breaks on port-security / captive portals |
 | Whonix support | default, supported | "unrecommended / untested / breaks networking" |
 
 Notes on the two subtle rows:
@@ -121,6 +121,38 @@ Notes on the two subtle rows:
   (192.168.0.0/24, 192.168.1.0/24, 10.0.2.2/24) is a live surface on a real LAN
   rather than the tiny isolated 10.0.2.x of NAT. That is additive exposure, not a
   collapse of anonymity.
+
+## Wi-Fi: bridged usually fails outright
+
+On a Wi-Fi uplink, bridged is not merely "fragile" -- it typically does not work at
+all, which matters because laptops are the common Whonix host. The root cause is
+802.11 itself: in infrastructure mode a station associates with the access point
+using ONE MAC address, and the AP then accepts frames only from that associated MAC
+and discards frames carrying any other source address. A bridge forwards the guest's
+frames unchanged, so the guest's own MAC reaches the AP and is dropped and the guest
+gets no connectivity. This is not virtualizer-specific: Proxmox's WLAN guidance states
+it plainly and recommends against bridging over WLAN, and FreeBSD/bhyve users hit the
+same wall. A guest can even obtain a DHCP lease yet still be dropped, because some APs
+additionally bind the leased IP to the associated MAC (Ruckus).
+
+VirtualBox papers over it only partially, by rewriting MAC addresses, because "most
+wireless adapters do not support promiscuous mode": it "needs to replace the source
+MAC address in the Ethernet header of an outgoing packet" with the host Wi-Fi
+adapter's MAC, replaces the destination MAC on the reply, and "examines ARP and DHCP
+packets in order to learn the IP addresses of virtual machines" to demultiplex those
+replies (VirtualBox manual). Because the demux depends on tracking L3 addresses, this
+works for IPv4 and IPv6 ONLY -- "for other protocols, such as IPX, you must choose a
+wired interface" -- on macOS (AirPort) and Linux; Oracle Solaris has "no support for
+using wireless interfaces" at all.
+
+KVM/libvirt bridge and macvtap have no such built-in rewrite, so bridging a guest over
+a Wi-Fi station interface generally does not work there either. The documented
+options are a MAC-rewriting ebtables hack, 4-address/WDS mode (only if the AP supports
+it), or -- the standard recommendation -- NAT.
+
+So on Wi-Fi the practical choice for a VM gateway is user-mode NAT; bridged is a
+wired-LAN option. This is a concrete, substantiated reliability reason for the NAT
+default, independent of the security arguments above.
 
 ## Is Whonix's "bridged is bad" substantiated, or historical?
 
@@ -179,8 +211,11 @@ physical LAN), not the default and not the ISN fix.
 
 ## Sources
 
-- VirtualBox manual, Virtual Networking -- https://www.virtualbox.org/manual/ch06.html
+- VirtualBox manual, Virtual Networking (bridged, and the wireless MAC-rewrite + IPv4/IPv6-only limits) -- https://www.virtualbox.org/manual/ch06.html
 - libvirt, Domain XML (interfaces: user/passt/bridge/direct) -- https://libvirt.org/formatdomain.html
+- Proxmox WLAN wiki (why bridging over Wi-Fi fails; recommends against it) -- https://pve.proxmox.com/wiki/WLAN
+- FreeBSD bhyve: no guest network when bridged from a Wi-Fi interface -- https://forums.freebsd.org/threads/no-network-on-guest-when-bridged-from-wi-fi-interface.89148/
+- Ruckus KB: AP binds leased IP to the associated MAC (VM gets an IP but is dropped) -- https://support.ruckuswireless.com/answers/000004024
 - passt -- https://passt.top/passt/about/
 - Whonix-Gateway Security (the bridged warning) -- https://www.whonix.org/wiki/Whonix-Gateway_Security
 - Whonix Troubleshooting (virtualizer settings / "breaks networking") -- https://www.whonix.org/wiki/Troubleshooting

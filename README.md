@@ -16,6 +16,18 @@ citations) solve it, judges the options, and records the decision.
   VirtualBox's chipset (proven), plus the clean next step toward a first-class
   `emulation/qemu-vbox` coreboot board. Code: `org-ai-assisted/virtualbox` and
   `org-ai-assisted/dasharo`.
+- [vbox-q35-chipset-port.md](vbox-q35-chipset-port.md) -- the next step taken:
+  porting a Q35/ICH9 chipset into VirtualBox so coreboot's upstream `qemu-q35`
+  board (the board Dasharo's UEFI + Sovereign Boot build on) boots, default
+  firmware unbroken. Surveys how QEMU models the Q35 MCH (`PCIEXBAR` -> ECAM
+  relocation), the ICH9 LPC (`PMBASE` -> ACPI PM-block relocation) and SMBus; adds
+  an opt-in, default-off `Q35Chipset` (MCH host bridge + `PCIEXBAR` intercept +
+  SMBus stub); records the coreboot `PMBASE = 0x4000` workaround (VirtualBox's ICH9
+  LPC `PMBASE` is not wired to its ACPI PM block, which froze the edk2 payload's
+  MP-init `MicroSecondDelay` on a dead PM-timer port) and the RELEASE-vs-DEBUG
+  payload gotcha. Verified: both i440fx and q35 boot the full Kicksecure LXQt
+  desktop on VirtualBox. Code: `org-ai-assisted/virtualbox-coreboot`,
+  `org-ai-assisted/coreboot`, `org-ai-assisted/edk2`.
 - [usb-installed-system.md](usb-installed-system.md) -- how to provide
   whole-root persistence (and full-disk encryption) on a USB you boot from.
   Surveys Tails, Debian live-boot, Fedora `livecd-iso-to-disk`, Ubuntu

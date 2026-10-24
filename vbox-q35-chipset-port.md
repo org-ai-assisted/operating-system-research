@@ -26,23 +26,40 @@ hardware contracts, from the QEMU/Q35 and ICH9 datasheet behaviour coreboot reli
 on:
 
 - **MCH host bridge (D0:F0), `PCIEXBAR` (0x60, 64-bit).** Firmware writes the ECAM
-  base + length + enable bit; the MCH relocates the MMCONFIG window to that base.
-  coreboot's `make_pciexbar()` uses `CONFIG_ECAM_MMCONF_BASE_ADDRESS` (default
-  `0xb0000000`, 256 buses), writes it via legacy CF8/CFC, then validates the
-  readback. QEMU honours the relocation; real hardware does too.
+  base + length + enable bit; the MCH relocates the MMCONFIG window to that base
+  (QEMU [`hw/pci-host/q35.c`](https://github.com/qemu/qemu/blob/v9.2.0/hw/pci-host/q35.c),
+  `mch_update_pciexbar`). coreboot's `make_pciexbar()` uses
+  `CONFIG_ECAM_MMCONF_BASE_ADDRESS` (default `0xb0000000`, 256 buses), writes it via
+  legacy CF8/CFC, then validates the readback (coreboot
+  [`qemu-q35/memmap.c`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/mainboard/emulation/qemu-q35/memmap.c),
+  [`qemu-q35/Kconfig`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/mainboard/emulation/qemu-q35/Kconfig)).
+  QEMU honours the relocation; real hardware does too.
 - **ICH9 LPC (D31:F0), `PMBASE` (0x40) + `ACPI_CNTL` (0x44).** Firmware programs the
   ACPI power-management I/O block base; the LPC relocates the PM1/PM-timer/GPE I/O
-  decode there. coreboot `i82801ix` sets `DEFAULT_PMBASE` and advertises the PM
-  timer at `PMBASE + 8` in the FADT. QEMU's ICH9 honours the relocation.
-- **ICH9 SMBus (D31:F3), Intel vendor 0x8086.** `enable_smbus()` finds the device
-  by (fixed) devfn, reads its vendor id, sets the SMB I/O base + enable, and resets
-  the host controller. On an emulated board it then does no real SPD transaction.
-- **SMM** is optional in coreboot (`CPU_QEMU_X86_NO_SMM` selects `NO_SMM`).
+  decode there (QEMU
+  [`hw/isa/lpc_ich9.c`](https://github.com/qemu/qemu/blob/v9.2.0/hw/isa/lpc_ich9.c),
+  `ich9_lpc_pmbase_sci_update`). coreboot
+  [`i82801ix`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/southbridge/intel/i82801ix/i82801ix.h)
+  sets `DEFAULT_PMBASE` and advertises the PM timer at `PMBASE + 8` in the FADT.
+  QEMU's ICH9 honours the relocation.
+- **ICH9 SMBus (D31:F3), Intel vendor 0x8086** (QEMU
+  [`hw/i2c/smbus_ich9.c`](https://github.com/qemu/qemu/blob/v9.2.0/hw/i2c/smbus_ich9.c)).
+  coreboot's
+  [`enable_smbus()`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/southbridge/intel/i82801ix/early_init.c)
+  finds the device by (fixed) devfn, reads its vendor id, sets the SMB I/O base +
+  enable, and resets the host controller. On an emulated board it then does no real
+  SPD transaction.
+- **SMM** is optional in coreboot
+  ([`CPU_QEMU_X86_NO_SMM`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/cpu/qemu-x86/Kconfig)
+  selects `NO_SMM`).
 
 ## What VirtualBox actually provides (and the gaps)
 
-Verified empirically and in the VirtualBox 7.2.20 source (`DevPciIch9.cpp`,
-`DevACPI.cpp`, `ConsoleImplConfigX86.cpp`):
+Verified empirically and in the
+[VirtualBox 7.2.20 source](https://download.virtualbox.org/virtualbox/7.2.20/VirtualBox-7.2.20.tar.bz2)
+([`DevPciIch9.cpp`](https://github.com/org-ai-assisted/virtualbox-coreboot/blob/7a9bba0/src/VBox/Devices/Bus/DevPciIch9.cpp),
+[`DevACPI.cpp`](https://github.com/org-ai-assisted/virtualbox-coreboot/blob/7a9bba0/src/VBox/Devices/PC/DevACPI.cpp),
+and the host-side `ConsoleImplConfigX86.cpp`):
 
 - `ich9` exposes a real ECAM window (`McfgBase` ~ `0xdc000000` = 4G - RAM-hole, 64
   buses) + an ACPI MCFG -- but the base is hypervisor-fixed, not firmware-programmable
@@ -57,16 +74,19 @@ Verified empirically and in the VirtualBox 7.2.20 source (`DevPciIch9.cpp`,
 
 ## The port (VirtualBox side, opt-in, legacy-safe)
 
-An opt-in `Q35Chipset` mode was added to `DevPciIch9.cpp`
+An opt-in `Q35Chipset` mode was added to
+[`DevPciIch9.cpp`](https://github.com/org-ai-assisted/virtualbox-coreboot/blob/7a9bba0/src/VBox/Devices/Bus/DevPciIch9.cpp)
 (`org-ai-assisted/virtualbox-coreboot@ai`), CFGM key
 `VBoxInternal/Devices/ich9pci/0/Config/Q35Chipset`, **default off** so legacy `ich9`
-is byte-for-byte unchanged (verified: stock EFI still boots the desktop with the
-rebuilt device library). It adds the two devices coreboot `qemu-q35` needs:
+behaviour is unchanged on the tested path (verified: stock EFI still boots the
+desktop with the rebuilt device library). It adds the two devices coreboot
+`qemu-q35` needs:
 
 - **Q35 MCH host bridge at 00:00.0** (Intel 0x8086 / 0x29c0). A config-access
   intercept treats a `PCIEXBAR` (reg 0x60/0x64) write like a real MCH: it relocates
   VirtualBox's ECAM MMIO window to the firmware-programmed base (cf. QEMU's
-  `mch_update_pciexbar`). So `machine_check` passes and ECAM lands where the q35
+  [`mch_update_pciexbar`](https://github.com/qemu/qemu/blob/v9.2.0/hw/pci-host/q35.c)).
+  So `machine_check` passes and ECAM lands where the q35
   board expects it (`0xb0000000`).
 - **ICH9 SMBus stub at 00:1f.3** (Intel 0x8086 / 0x2930, SMBus class). Presence-only:
   `enable_smbus()` only checks the vendor id and writes config; qemu-q35 issues no
@@ -78,21 +98,21 @@ rebuilt device library). It adds the two devices coreboot `qemu-q35` needs:
 Build `emulation/qemu-q35` with `CONFIG_CPU_QEMU_X86_NO_SMM=y` (VirtualBox has no
 SMRAM/TSEG), keeping `UefiPayloadPkg`. One VirtualBox-specific workaround is needed:
 
-- **`DEFAULT_PMBASE` 0x600 -> 0x4000** for the VirtualBox target. Because the ICH9
+- **[`DEFAULT_PMBASE`](https://github.com/org-ai-assisted/coreboot/blob/fe1e134c67/src/southbridge/intel/i82801ix/i82801ix.h) 0x600 -> 0x4000** for the VirtualBox target. Because the ICH9
   LPC `PMBASE` write is not wired to VirtualBox's `DevACPI` PM block (above), the PM
   block stays at `0x4000`. coreboot's default `0x600` would put the FADT PM timer at
   `0x608`, which VirtualBox does not decode. Setting `PMBASE = 0x4000` aligns the
   generated FADT PM timer (`0x4008`) with VirtualBox's live timer.
 
 The PMBASE gap surfaced as a subtle hang, worth recording: the edk2 `UefiPayloadPkg`
-binds `AcpiTimerLib` (the non-universal payload), so `MicroSecondDelay` -- used by
+binds [`AcpiTimerLib`](https://github.com/org-ai-assisted/edk2/blob/c30f1b90f/UefiPayloadPkg/Library/AcpiTimerLib/AcpiTimerLib.c) (the non-universal payload), so `MicroSecondDelay` -- used by
 `CpuDxe`'s MP-init AP wait -- polls the FADT ACPI PM-timer I/O port. With the FADT
 pointing at the dead `0x608`, the delay spun forever and the BSP wedged right after
 setting up the AP wakeup vector (identical code sailed through on i440fx, whose PM
 block IS relocated). Pointing `PMBASE` at `0x4000` fixed it. Separately, build the
 payload as **RELEASE**: a DEBUG payload halts at a benign `DXE_ASSERT` in
-`DxeTcgPhysicalPresenceLib` at BdsDxe (no TPM present); RELEASE skips asserts and
-boots.
+[`DxeTcgPhysicalPresenceLib`](https://github.com/org-ai-assisted/edk2/blob/c30f1b90f/UefiPayloadPkg/Library/TcgPhysicalPresenceLibUefiPayload/DxeTcgPhysicalPresenceLib.c)
+at BdsDxe (no TPM present); RELEASE skips asserts and boots.
 
 ## Result (verified)
 
@@ -137,8 +157,11 @@ the VirtualBox side: wire the ICH9 LPC `PMBASE`/`ACPI_CNTL` write to
 path, after which coreboot's standard `0x600` works unmodified. That is the clean
 next step.
 
-Code: `org-ai-assisted/virtualbox-coreboot` (DevPciIch9 Q35Chipset, DevEFI
-CorebootRom, DevACPI SLP_EN), `org-ai-assisted/coreboot` (qemu-q35 build + bochs
-VBox-VGA + i82801ix PMBASE), `org-ai-assisted/edk2` (UefiPayloadPkg fb-retag PCD).
+Code: [`org-ai-assisted/virtualbox-coreboot`](https://github.com/org-ai-assisted/virtualbox-coreboot/tree/7a9bba0)
+(DevPciIch9 Q35Chipset, DevEFI CorebootRom, DevACPI SLP_EN),
+[`org-ai-assisted/coreboot`](https://github.com/org-ai-assisted/coreboot/tree/fe1e134c67)
+(qemu-q35 build + bochs VBox-VGA + i82801ix PMBASE),
+[`org-ai-assisted/edk2`](https://github.com/org-ai-assisted/edk2/tree/c30f1b90f)
+(UefiPayloadPkg fb-retag PCD).
 Operational specifics (build/boot harness, the ring-0 gotcha) live in dist-ai
 `usr/share/dasharo-vbox-boot-tests/AGENTS.md`, not here.

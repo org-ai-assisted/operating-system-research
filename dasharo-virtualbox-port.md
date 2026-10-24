@@ -9,10 +9,18 @@ made to run as the firmware of a VirtualBox guest, and if so, what is the smalle
 cleanest change that achieves it?
 
 This note records the architecture finding, the change we made, the proof it works,
-and the clean next step. The two code deliverables live in their own repos:
+and the clean next step. The code lives in these forks:
 
-- `org-ai-assisted/virtualbox` -- the VirtualBox-side change (a `DevEFI` loader path).
-- `org-ai-assisted/dasharo` -- the coreboot-side firmware config, proof, and plan.
+- [`org-ai-assisted/virtualbox`](https://github.com/org-ai-assisted/virtualbox) -- the
+  VirtualBox-side change (a `DevEFI` raw-image loader path, plus the ACPI `SLP_EN` fix).
+- [`org-ai-assisted/coreboot`](https://github.com/org-ai-assisted/coreboot) -- the coreboot
+  fork (the `emulation/qemu-i440fx` config + build recipe used for the VirtualBox ROM).
+- [`org-ai-assisted/edk2`](https://github.com/org-ai-assisted/edk2) -- the `UefiPayloadPkg`
+  edk2 fork built as the coreboot payload.
+- [`org-ai-assisted/dasharo-edk2`](https://github.com/org-ai-assisted/dasharo-edk2) -- the
+  `DasharoPayloadPkg` / Sovereign Boot source (vendored from upstream `Dasharo/edk2`).
+- [`org-ai-assisted/dasharo`](https://github.com/org-ai-assisted/dasharo) -- the coreboot-side
+  firmware config, proof logs (`proof/`), and plan.
 
 ## What Dasharo actually is (the pivotal fact)
 
@@ -30,8 +38,9 @@ and whatever it takes for the hypervisor to load that image.
 
 ## Why VirtualBox cannot load it as-is
 
-VirtualBox's EFI device (`src/VBox/Devices/EFI/DevEFI.cpp`) accepts only an
-OVMF-shaped combined flash descriptor:
+VirtualBox's EFI device
+([`src/VBox/Devices/EFI/DevEFI.cpp`](https://github.com/org-ai-assisted/virtualbox/blob/main/src/VBox/Devices/EFI/DevEFI.cpp))
+accepts only an OVMF-shaped combined flash descriptor:
 
 - `efiParseFirmware` requires a varstore-first firmware volume whose first FV carries
   `gEfiSystemNvDataFvGuid` (`FFF12B8D-7696-4C8B-A985-2747075B4F50`, the standard edk2
@@ -66,8 +75,8 @@ only, with no change to the shared `DEVEFI` device struct**.
   valid, so the *unmodified* ring-0 construct runs as-is. No ring-0 code changes.
 
 The result is three small hunks in one file, with no ABI impact. See the
-`org-ai-assisted/virtualbox` repo for the full modified `DevEFI.cpp` and the exact
-diff recipe.
+[`org-ai-assisted/virtualbox`](https://github.com/org-ai-assisted/virtualbox) repo for the
+full modified `DevEFI.cpp` and the exact diff recipe.
 
 ## Proof it works
 
@@ -92,7 +101,9 @@ takes its documented CMOS fallback for RAM sizing ("QEMU: firmware config interf
 not found / Falling back to RAM info in CMOS"). With `PAYLOAD_NONE` coreboot stops
 after device enumeration.
 
-A real `DasharoPayloadPkg` UEFI payload was then built from `Dasharo/edk2`
+A real `DasharoPayloadPkg` UEFI payload was then built from upstream
+[`Dasharo/edk2`](https://github.com/Dasharo/edk2) (vendored as
+[`org-ai-assisted/dasharo-edk2`](https://github.com/org-ai-assisted/dasharo-edk2))
 (`-D BOOTLOADER=COREBOOT -D TPM_ENABLE=FALSE -D SECURE_BOOT_ENABLE=FALSE`) and
 integrated into the 4 MiB ROM via `cbfstool add-payload` (the 14.8 MiB FV LZMA-packs
 to ~910 KiB; load `0x800000`, entry `0x800860`).
@@ -112,7 +123,9 @@ off: VirtualBox relocates its PM decode from coreboot's `PMBA` write so the FADT
 ports line up, and a real guest shutdown (`SLP_TYP=5` with `SLP_EN`) still powers off.
 
 **Gap 2 -- UEFI payload to an interactive shell -- SOLVED.** With gap 1 fixed, a real
-coreboot `UefiPayloadPkg` (the classic build, MrChromebox fork) boots all the way to an
+coreboot `UefiPayloadPkg` (the classic build; the edk2 fork is
+[`org-ai-assisted/edk2`](https://github.com/org-ai-assisted/edk2), derived from the
+MrChromebox tree) boots all the way to an
 **interactive UEFI shell** inside the patched VirtualBox, ACPI functional, and `reset
 -s` at the prompt powers the VM off via a clean ACPI S5. Getting there meant closing a
 chain of VBox-vs-QEMU/real-hardware differences, each with a one-line fix: the payload's
@@ -122,15 +135,18 @@ asserts (no HPET) -> `--hpet on`; VBox's HPET never delivers its interrupt -> bu
 the LAPIC timer (`CONFIG_EDK2_USE_LAPIC_TIMER`); a `#GP` in `PciHostBridgeDxe` from an
 entryless MCFG (i440fx has no ECAM, no `fw_cfg` to read QEMU's) -> a one-guard coreboot
 `acpi_create_mcfg` fix to not emit it; then RELEASE + `EDK2_SERIAL_SUPPORT` for the shell
-on COM1. The full recipe + proof log are in `org-ai-assisted/dasharo`.
+on COM1. The full recipe + proof log are in
+[`org-ai-assisted/dasharo`](https://github.com/org-ai-assisted/dasharo).
 
 So the enabling VirtualBox change is proven end to end: it runs real coreboot firmware
 with functional ACPI, through a full UEFI payload to an interactive shell. The remaining
-polish is the Dasharo payload specifically (its PEI ACPI-board-info HOB ordering) and
-folding the five VM/build tweaks into a dedicated coreboot board so a stock VM needs no
-per-VM flags -- the next section.
+polish was the Dasharo payload specifically (its PEI ACPI-board-info HOB ordering) and
+folding the VM/build tweaks so a stock VM needs no per-VM behaviour differences -- both
+closed on 2026-10-24 (see the Update section below): the **Dasharo Sovereign Boot
+Provisioning Wizard now renders in VirtualBox**, and a full disk install runs on top of it.
 
-The full serial captures are in `org-ai-assisted/dasharo` under `proof/`
+The full serial captures are in
+[`org-ai-assisted/dasharo`](https://github.com/org-ai-assisted/dasharo) under `proof/`
 (`coreboot-on-vbox-serial.log`, `dasharo-payloadpkg-vbox-serial.log`,
 `dasharo-payloadpkg-qemu-handoff.log`).
 
@@ -168,6 +184,44 @@ dedicated board rather than reusing the QEMU board:
 That produces a genuine Dasharo firmware image for VirtualBox, loadable with the same
 `DevEFI` `CorebootRom` path. Both changes (the coreboot board and the one-boolean
 `DevEFI` loader) are small and self-contained enough to offer upstream.
+
+## Update (2026-10-24): Dasharo payload renders, and a full install on top
+
+The two open items above are now closed, on the same patched VirtualBox 7.2.20 and coreboot
+`emulation/qemu-i440fx` ROM, built from the forks linked at the top.
+
+**The Dasharo Sovereign Boot Provisioning Wizard renders in VirtualBox.** The real
+`DasharoPayloadPkg` (built `SECURE_BOOT_ENABLE=TRUE` + `SOVEREIGN_BOOT_ENABLE=TRUE`) boots to
+its first-boot Secure Boot setup UI. The PEI ACPI-board-info HOB ordering fault was the gate:
+`AcpiTimerLib` needs `gUefiAcpiBoardInfoGuid`, which `BlSupportPei` builds too late for the
+PCD PEIM, so PEI uses the MdePkg TSC `SecPeiDxeTimerLibCpu` instead (VBox reports CPUID.15H
+= 0, so `BaseCpuTimerLib` is out). VirtualBox has no flash, so the UEFI variable store uses
+OVMF's memory FVB (`EmuVariableFvbRuntimeDxe` + the size PCDs `FixedAtBuild`, dropping
+`NvVarStoreFormattedLib`). Source: [`org-ai-assisted/dasharo-edk2`](https://github.com/org-ai-assisted/dasharo-edk2).
+
+**A full Kicksecure disk install runs end to end on the coreboot firmware** -- firmware ->
+GRUB -> live desktop -> Calamares LUKS install -> reboot -> LUKS unlock -> installed desktop
+-- driven by the `dm-calamares-install` lane in
+[`org-ai-assisted/dist-ai`](https://github.com/org-ai-assisted/dist-ai). Two findings were
+needed:
+
+- *Guest detection.* The guest-additions service (`vboxadd-service`, which has
+  `ConditionVirtualization=oracle`) only starts when the guest detects it is in VirtualBox.
+  `systemd-detect-virt` resolves `oracle` from DMI (`sys_vendor=innotek GmbH` /
+  `product=VirtualBox`), but coreboot sets the DMI vendor to `coreboot`, so it falls through
+  to CPUID and reads the Linux paravirt interface as `kvm` -- the GA never starts and guest
+  control never comes up. Fix: set the coreboot SMBIOS **System** info to `innotek GmbH` /
+  `VirtualBox` (it is a VirtualBox VM) while the SMBIOS **BIOS** vendor stays `coreboot`, so
+  the guest detects `oracle` and the firmware is still truthfully reported as coreboot.
+- *NVRAM.* coreboot writes its varstore to the VM `.nvram` in coreboot FMAP format, which
+  VirtualBox cannot reload on the next power-on; the installed disk boots via the UefiPayload
+  boot manager scanning the ESP, so the lane drops the stale `.nvram` before the reboot.
+
+**The stock VirtualBox GUI displays the coreboot guest.** The GUI is a version-matched COM
+display client -- the coreboot firmware lives in the VM process's device code (`VBoxDD`), not
+in the GUI. Running the unmodified stock `VirtualBoxVM` while its VM process loads the fork's
+`VBoxDD` (which carries the `CorebootRom` loader) renders the Sovereign Boot wizard in a
+normal VirtualBox VM window; no GUI-side change is needed.
 
 ## Decision
 

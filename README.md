@@ -45,6 +45,20 @@ citations) solve it, judges the options, and records the decision.
   and/or Sovereign own-key) chainloading a Kicksecure-signed UKI (Debian
   kernel+initrd) over dm-verity, MOK preserved; measured boot + TPM-sealed FDE as
   defense-in-depth; IMA measurement-only.
+- [hyperv-vhdx-port.md](hyperv-vhdx-port.md) -- a Hyper-V (VHDX) image target so
+  Kicksecure imports into Microsoft Windows native virtualization, since VirtualBox
+  degrades badly on recent Windows with VBS/HVCI/Hyper-V coexistence (a Whonix user hits
+  exactly this black-screen hang). Surveys how Debian (FAI cloud images), Ubuntu
+  (livecd-rootfs Hyper-V Quick Create) and mainline LIS ship Hyper-V guests. Finds the
+  usual Gen2 blocker (BIOS-only `grub-pc`) does NOT apply here: derivative-maker's amd64
+  raw is already hybrid BIOS + UEFI (`grub-cloud-amd64` -> `i386-pc` + `x86_64-efi` +
+  `shim-signed`), so one VHDX is expected to serve Gen1 and Gen2 (Secure Boot capable)
+  with no bootloader change. The conversion is a near-clone of the qcow2 step
+  (`qemu-img ... -O vhdx -S 0` from the raw, never from the `.ova`); the only new code is
+  a `vhdx-reproducible-normalize` to pin the VHDX header GUIDs. Deliverable: a compressed
+  `.vhdx` plus a PowerShell import script (Gen2 + the Microsoft UEFI CA template). Design
+  note, not yet built or booted; scoped to Kicksecure single VM first (Whonix pair
+  deferred). Code target: `org-ai-assisted/derivative-maker`.
 - [nat-vs-bridged-vm-networking.md](nat-vs-bridged-vm-networking.md) -- which VM
   networking mode for a Whonix-Gateway. Separates the two families (user-mode
   connection-terminating NAT -- VirtualBox NAT, KVM passt/SLIRP -- versus on-LAN

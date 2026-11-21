@@ -54,8 +54,9 @@ citations) solve it, judges the options, and records the decision.
   raw is already hybrid BIOS + UEFI (`grub-cloud-amd64` -> `i386-pc` + `x86_64-efi` +
   `shim-signed`), so one VHDX is expected to serve Gen1 and Gen2 (Secure Boot capable)
   with no bootloader change. The conversion is a near-clone of the qcow2 step
-  (`qemu-img ... -O vhdx -S 0` from the raw, never from the `.ova`); the only new code is
-  a `vhdx-reproducible-normalize` to pin the VHDX header GUIDs. Deliverable: a compressed
+  (`qemu-img ... -O vhdx` from the raw, never from the `.ova`); the only new code is
+  a `vhdx-reproducible-normalize` to pin the VHDX header GUIDs + sequence numbers and
+  recompute its CRC-32C checksums. Deliverable: a compressed
   `.vhdx` plus a PowerShell import script (Gen2 + the Microsoft UEFI CA template). Design
   note, not yet built or booted; scoped to Kicksecure single VM first (Whonix pair
   deferred). Code target: `org-ai-assisted/derivative-maker`.

@@ -80,6 +80,16 @@ boot-test lane already exercises this image under BIOS, EFI, and EFI + Secure Bo
 the dual-firmware image is a known-good quantity (under qemu/OVMF; see the open
 verification for the Hyper-V firmware specifically).
 
+Microsoft's own guidance is that a bootable VHDX targets a single generation -- a Gen2 VM
+boots only UEFI, a Gen1 VM only BIOS
+([learn.microsoft.com gen1-vs-gen2](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/plan/should-i-create-a-generation-1-or-2-virtual-machine-in-hyper-v)).
+A hybrid disk that boots under either is technically possible -- ours already boots BIOS
+and UEFI under qemu and VirtualBox -- but it is not a configuration Microsoft tests or
+recommends. So Gen2 (UEFI) is the HEADLINE, supported target; Gen1 is a secondary bonus,
+and the Gen1 claim is honest only once boot-tested on its own (a Gen1 Hyper-V VM, same
+root-disk check as the Gen2 gate -- see the open verification). Until Gen1 is tested, ship
+and advertise Gen2 only.
+
 Secure Boot has one Hyper-V-side catch, documented for the import step, not the image:
 the default "Microsoft Windows" Secure Boot template will not validate a Linux shim; the
 VM must use the "Microsoft UEFI Certificate Authority" template
@@ -236,16 +246,18 @@ Reusing patterns already in the tree, scoped to one new target named `hyperv` (t
 
 Before committing to this design: build one UEFI-GPT Kicksecure raw image, convert it
 with `qemu-img ... -O vhdx -o subformat=dynamic`, and boot it end to end in a real
-Hyper-V Gen2 VM, both with Secure Boot on (UEFI CA template) and off. Confirm the root
-disk mounts without a manual initramfs change on the exact target kernel
+Hyper-V Gen2 VM, both with Secure Boot on (UEFI CA template) and off -- and, to
+substantiate the Gen1 claim at all, boot the same image once in a Gen1 (BIOS) Hyper-V VM
+with the identical root-disk check (else ship Gen2-only and drop the Gen1 claim). Confirm
+the root disk mounts without a manual initramfs change on the exact target kernel
 (`lsinitramfs | grep hv_storvsc`); if it does not, add the `hv_*` modules to the
 initramfs as above. Also settle the sparse/allocation question empirically: confirm which
 `.vhdx` shape Hyper-V accepts -- a compact dynamic VHDX with the Windows NTFS sparse flag
 cleared -- without falling back to a fully-allocated `-S 0` image, and that the
 reproducibility normalizer's output (pinned GUIDs and sequence numbers, recomputed
 CRC-32C) still opens and boots. This closes the residual unknowns: that a Gen2 VM boots
-our dual-firmware image, that the root disk is reachable out of the box, and that the
-compact, reproducible VHDX imports cleanly. Only after that boots should the pipeline
+our dual-firmware image (and, if the Gen1 claim is kept, a Gen1 VM too), that the root
+disk is reachable out of the box, and that the compact, reproducible VHDX imports cleanly. Only after that boots should the pipeline
 work land.
 
 ## Decision (proposed)
@@ -253,9 +265,10 @@ work land.
 - Add a first-class `hyperv` build target that emits a dynamic VHDX converted from the
   existing raw image (`qemu-img ... -O vhdx`, never from the `.ova`), reusing the
   qcow2 step as the template.
-- Rely on the image's existing hybrid BIOS + UEFI boot, so one VHDX serves Hyper-V Gen1
-  and Gen2 (Secure Boot capable via the signed shim) with no partition or bootloader
-  change.
+- Rely on the image's existing hybrid BIOS + UEFI boot: Gen2 (UEFI, Secure Boot capable
+  via the signed shim) is the headline target, no partition or bootloader change; the same
+  disk can also boot Gen1 (BIOS), a secondary bonus to advertise only once Gen1 is
+  boot-tested, since Microsoft recommends one generation per bootable VHDX.
 - Write one small `vhdx-reproducible-normalize` to keep the artifact bit-reproducible;
   that is the only genuinely new code.
 - Ship the compressed `.vhdx` plus a PowerShell import script (Generation 2 and the

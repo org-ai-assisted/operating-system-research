@@ -183,10 +183,17 @@ builds `HYPERV_STORAGE` (hv_storvsc), `HYPERV_NET` (hv_netvsc), `HYPERV_KEYBOARD
 `PCI_HYPERV`, and `FB_HYPERV` as modules, and the stock Debian kernels the default image
 uses carry them too. The only in-guest concern is that the storage driver must be in the
 initramfs so a Gen2 VM finds its root disk at first boot. Nothing in the tree currently
-forces `hv_vmbus`/`hv_storvsc`/`hv_netvsc`/`hv_utils` into the initramfs; whether they
-are already pulled in depends on the exact kernel config. The safe default is to add them
-to `/etc/initramfs-tools/modules` and rebuild the initramfs, and optionally install
-`hyperv-daemons` for integration services. This is confirmed only by booting (see below).
+forces `hv_vmbus`/`hv_storvsc`/`hv_netvsc`/`hv_utils` into the initramfs. Kicksecure's
+default initramfs generator is dracut, not initramfs-tools (`variables.d/25_initramfs.bsh`
+sets `BUILD_INITRAMFS_PKGS` to dracut; `build-steps.d/3500_install-packages` rebuilds with
+`dracut --no-hostonly ... --reproducible`), so `/etc/initramfs-tools/modules` is never
+read. That `--no-hostonly` (generic) rebuild pulls in a broad storage-driver set, so
+`hv_storvsc` may already be present; whether it is depends on the exact kernel config. The
+safe default, if a boot test shows it missing, is to force the drivers in with a dracut
+drop-in -- `/etc/dracut.conf.d/90-hyperv.conf` containing
+`add_drivers+=" hv_vmbus hv_storvsc hv_netvsc hv_utils "` (the surrounding spaces are
+required) -- and rebuild the initramfs, and optionally install `hyperv-daemons` for
+integration services. This is confirmed only by booting (see below).
 
 ## Deliverable and import UX
 
@@ -257,7 +264,7 @@ Hyper-V Gen2 VM, both with Secure Boot on (UEFI CA template) and off -- and, to
 substantiate the Gen1 claim at all, boot the same image once in a Gen1 (BIOS) Hyper-V VM
 with the identical root-disk check (else ship Gen2-only and drop the Gen1 claim). Confirm
 the root disk mounts without a manual initramfs change on the exact target kernel
-(`lsinitramfs | grep hv_storvsc`); if it does not, add the `hv_*` modules to the
+(`lsinitrd | grep hv_storvsc`); if it does not, add the `hv_*` modules to the
 initramfs as above. Also settle the sparse/allocation question empirically: confirm which
 `.vhdx` shape Hyper-V accepts -- a compact dynamic VHDX with the Windows NTFS sparse flag
 cleared -- without falling back to a fully-allocated `-S 0` image, and that the
